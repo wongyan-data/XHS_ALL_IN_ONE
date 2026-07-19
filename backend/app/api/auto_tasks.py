@@ -760,7 +760,7 @@ def run_auto_task(
     auto_task = _get_owned_auto_task(db, current_user, task_id)
 
     # Verify account ownership (Weibo tasks don't need pc accounts checks)
-    if auto_task.task_type == "xhs_keyword":
+    if auto_task.task_type in ("xhs_keyword", "group_consolidation"):
         _verify_account_ownership(db, current_user, auto_task.pc_account_id, "pc")
     _verify_account_ownership(db, current_user, auto_task.creator_account_id, "creator")
 
