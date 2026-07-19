@@ -176,10 +176,10 @@ class OpenAICompatibleTextClient:
         return self._complete(
             model_config=model_config,
             api_key=api_key,
-            system_prompt="你是小红书内容运营编辑，负责在保留事实的前提下改写成自然、可发布的种草笔记。",
+            system_prompt="你是小红书内容运营编辑，负责在保留事实的前提下改写成自然、可发布的种草笔记。请只返回改写后的正文内容本身，千万不要包含任何标题、'标题：'、'正文：'等结构性标签前缀，直接输出段落内容。",
             user_prompt=(
                 f"改写要求：{instruction or '提升表达、增强小红书语感'}\n\n"
-                f"标题：{title}\n\n正文：\n{body}"
+                f"【正文原文】：\n{body}\n\n【参考标题】（仅作为上下文参考，请不要改写也不要输出标题）：\n{title}"
             ),
         )
 
@@ -257,7 +257,7 @@ class OpenAICompatibleTextClient:
         return self._complete(
             model_config=model_config,
             api_key=api_key,
-            system_prompt="你是小红书正文润色编辑。",
+            system_prompt="你是小红书正文润色编辑。请只返回润色后的正文内容本身，千万不要包含任何标题、'标题：'、'正文：'等标签前缀，直接输出段落内容。",
             user_prompt=f"润色要求：{instruction or '更自然、清晰、有种草感'}\n\n原文：\n{text}",
         )
 
