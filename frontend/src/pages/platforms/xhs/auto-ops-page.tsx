@@ -79,7 +79,7 @@ export function AutoOpsPage() {
   // Create form state
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState("");
-  const [createTaskType, setCreateTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment">("xhs_keyword");
+  const [createTaskType, setCreateTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation">("xhs_keyword");
   const [createKeywords, setCreateKeywords] = useState("");
   const [createPcAccountId, setCreatePcAccountId] = useState<number | null>(null);
   const [createCreatorAccountId, setCreateCreatorAccountId] = useState<number | null>(null);
@@ -93,7 +93,7 @@ export function AutoOpsPage() {
   // Edit modal state
   const [editTask, setEditTask] = useState<AutoTask | null>(null);
   const [editName, setEditName] = useState("");
-  const [editTaskType, setEditTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment">("xhs_keyword");
+  const [editTaskType, setEditTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation">("xhs_keyword");
   const [editKeywords, setEditKeywords] = useState("");
   const [editInstruction, setEditInstruction] = useState("");
   const [editScheduleType, setEditScheduleType] = useState("manual");
@@ -145,6 +145,10 @@ export function AutoOpsPage() {
       setError("小红书关键词监控任务必须选择 PC 账号，并填写至少一个关键词。");
       return;
     }
+    if (createTaskType === "group_consolidation" && keywords.length === 0) {
+      setError("特定团体多源信息监测任务必须填写至少一个监控团体名称。");
+      return;
+    }
 
     setIsCreating(true);
     setError(null);
@@ -154,7 +158,7 @@ export function AutoOpsPage() {
         name: createName.trim(),
         task_type: createTaskType,
         keywords,
-        pc_account_id: createTaskType === "xhs_keyword" ? createPcAccountId : null,
+        pc_account_id: (createTaskType === "xhs_keyword" || createTaskType === "group_consolidation") ? createPcAccountId : null,
         creator_account_id: createCreatorAccountId,
         ai_instruction: createInstruction,
         schedule_type: createScheduleType as "manual" | "daily" | "weekly" | "interval",
@@ -342,6 +346,8 @@ export function AutoOpsPage() {
                       <Tag color="magenta">微博文娱热搜</Tag>
                     ) : task.task_type === "weibo_hot" ? (
                       <Tag color="orange">微博热搜</Tag>
+                    ) : task.task_type === "group_consolidation" ? (
+                      <Tag color="purple">特定团体多源监测</Tag>
                     ) : (
                       <Tag color="cyan">小红书关键词</Tag>
                     )}
@@ -352,7 +358,7 @@ export function AutoOpsPage() {
                 {/* Keywords */}
                 <div style={{ marginBottom: 12 }}>
                   <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
-                    {task.task_type === "xhs_keyword" ? "关键词" : "关键词/分类过滤"}
+                    {task.task_type === "xhs_keyword" ? "关键词" : task.task_type === "group_consolidation" ? "监控团体名称" : "关键词/分类过滤"}
                   </Text>
                   <Space size={4} wrap>
                     {task.keywords && task.keywords.length > 0 ? (
@@ -525,6 +531,7 @@ export function AutoOpsPage() {
                       { value: "xhs_keyword", label: "小红书关键词监控" },
                       { value: "weibo_hot", label: "微博实时热搜监控" },
                       { value: "weibo_entertainment", label: "微博文娱热搜监控" },
+                      { value: "group_consolidation", label: "特定团体多源信息监测" },
                     ]}
                   />
                 </Form.Item>
@@ -540,9 +547,9 @@ export function AutoOpsPage() {
                 </Form.Item>
               </Col>
               <Col xs={24} md={8}>
-                <Form.Item label={createTaskType === "xhs_keyword" ? "关键词（每行一个）" : "关键词/分类过滤（每行一个，非必填）"} required={createTaskType === "xhs_keyword"}>
+                <Form.Item label={createTaskType === "xhs_keyword" ? "关键词（每行一个）" : createTaskType === "group_consolidation" ? "监控团体名称（每行一个）" : "关键词/分类过滤（每行一个，非必填）"} required={createTaskType === "xhs_keyword" || createTaskType === "group_consolidation"}>
                   <TextArea
-                    placeholder={createTaskType === "xhs_keyword" ? "低卡早餐\n减脂食谱\n健康饮食" : "刘宇宁\n综艺\n明星\n留空则监控全部文娱热搜"}
+                    placeholder={createTaskType === "xhs_keyword" ? "低卡早餐\n减脂食谱\n健康饮食" : createTaskType === "group_consolidation" ? "TFBoys\n时代少年团" : "刘宇宁\n综艺\n明星\n留空则监控全部文娱热搜"}
                     value={createKeywords}
                     onChange={(e) => setCreateKeywords(e.target.value)}
                     rows={2}
@@ -551,7 +558,7 @@ export function AutoOpsPage() {
               </Col>
             </Row>
             <Row gutter={16}>
-              {createTaskType === "xhs_keyword" && (
+              {(createTaskType === "xhs_keyword" || createTaskType === "group_consolidation") && (
                 <Col xs={24} md={12}>
                   <Form.Item label="PC 账号（用于抓取）" required>
                     <Select
@@ -567,7 +574,7 @@ export function AutoOpsPage() {
                   </Form.Item>
                 </Col>
               )}
-              <Col xs={24} md={createTaskType === "xhs_keyword" ? 12 : 24}>
+              <Col xs={24} md={(createTaskType === "xhs_keyword" || createTaskType === "group_consolidation") ? 12 : 24}>
                 <Form.Item label="Creator 账号（用于发布）" required>
                   <Select
                     placeholder="选择 Creator 账号"
@@ -671,6 +678,7 @@ export function AutoOpsPage() {
                 { value: "xhs_keyword", label: "小红书关键词监控" },
                 { value: "weibo_hot", label: "微博实时热搜监控" },
                 { value: "weibo_entertainment", label: "微博文娱热搜监控" },
+                { value: "group_consolidation", label: "特定团体多源信息监测" },
               ]}
             />
           </Form.Item>
@@ -681,7 +689,7 @@ export function AutoOpsPage() {
               maxLength={128}
             />
           </Form.Item>
-          <Form.Item label={editTaskType === "xhs_keyword" ? "关键词（每行一个）" : "关键词/分类过滤（每行一个，非必填）"}>
+          <Form.Item label={editTaskType === "xhs_keyword" ? "关键词（每行一个）" : editTaskType === "group_consolidation" ? "监控团体名称（每行一个）" : "关键词/分类过滤（每行一个，非必填）"}>
             <TextArea
               value={editKeywords}
               onChange={(e) => setEditKeywords(e.target.value)}

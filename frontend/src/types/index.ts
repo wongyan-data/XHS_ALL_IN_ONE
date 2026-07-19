@@ -661,7 +661,7 @@ export type AutoTask = {
 
 export type AutoTaskCreatePayload = {
   name: string;
-  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment";
+  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation";
   keywords: string[];
   pc_account_id?: number | null;
   creator_account_id: number;
@@ -674,7 +674,7 @@ export type AutoTaskCreatePayload = {
 
 export type AutoTaskUpdatePayload = {
   name?: string;
-  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment";
+  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation";
   keywords?: string[];
   pc_account_id?: number | null;
   ai_instruction?: string;
