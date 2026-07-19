@@ -908,6 +908,7 @@ export async function generateDraftFromWeiboHot(payload: {
   instruction?: string;
   reference_tweets: string[];
   image_urls: string[];
+  use_ai_image?: boolean;
 }): Promise<{ draft_id: number; title: string }> {
   const response = await http.post<{ draft_id: number; title: string }>("/weibo/hot-search/generate-draft", payload);
   return response.data;

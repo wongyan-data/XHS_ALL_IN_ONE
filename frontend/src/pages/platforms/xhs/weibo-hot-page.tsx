@@ -26,6 +26,7 @@ export function WeiboHotSearchPage() {
     "将此热搜主题改写为一篇吸引人的小红书图文笔记。风格活泼、口语化，使用大量适宜的表情符号增加趣味，并自动推荐3-5个小红书话题。"
   );
   const [generating, setGenerating] = useState(false);
+  const [useAiImage, setUseAiImage] = useState(true);
 
   // Load hot search on mount
   useEffect(() => {
@@ -77,7 +78,8 @@ export function WeiboHotSearchPage() {
         word: selectedWord,
         instruction: aiPrompt,
         reference_tweets: selectedTweets,
-        image_urls: selectedImages
+        image_urls: selectedImages,
+        use_ai_image: useAiImage
       });
       void message.success("小红书草稿生成成功，正在跳转到草稿箱...");
       // Redirect after a short delay
@@ -335,6 +337,16 @@ export function WeiboHotSearchPage() {
                 rows={4}
                 placeholder="在此输入 AI 改写指令..."
               />
+            </div>
+
+            <div style={{ marginTop: 4, marginBottom: 8 }}>
+              <Checkbox
+                checked={useAiImage}
+                onChange={(e) => setUseAiImage(e.target.checked)}
+                style={{ color: "#d9d9d9", fontSize: 13 }}
+              >
+                若无配图，允许自动调用 AI 生图 (未勾选则生成白底黑字极简图)
+              </Checkbox>
             </div>
 
             <Button

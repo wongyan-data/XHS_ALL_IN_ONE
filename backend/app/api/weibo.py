@@ -33,6 +33,7 @@ class GenerateDraftFromHotSearchRequest(BaseModel):
     instruction: Optional[str] = None
     reference_tweets: list[str] = Field(default_factory=list)
     image_urls: list[str] = Field(default_factory=list)
+    use_ai_image: bool = Field(default=True, description="Whether to use AI for image generation if no images exist")
 
 
 def _get_visitor_session(force_refresh: bool = False) -> Any:
@@ -329,37 +330,69 @@ def generate_draft_from_hot_search(
                 sort_order=idx
             ))
     else:
-        # If no Weibo images are available or selected, automatically generate a cover with AI
-        try:
-            from backend.app.api.ai import _image_model_context, get_image_ai_client
-            # Verify if default image model is configured
-            model_config, api_key = _image_model_context(db, current_user)
-            image_ai_client = get_image_ai_client()
-            
-            # Formulate painting prompt
-            paint_prompt = f"小红书风格插画，主题是：{title}。画面精美，色彩饱和，具有高度设计感与吸引力。"
-            
-            # Call AI draw
-            logger.info(f"Generating automatic AI cover for draft #{draft.id} with prompt: {paint_prompt}")
-            res = image_ai_client.generate_cover(
-                model_config=model_config,
-                api_key=api_key,
-                prompt=paint_prompt,
-                size="1024x1024",
-                style="vivid"
-            )
-            img_url = res.get("url")
-            if img_url:
-                db.add(DraftAsset(
-                    draft_id=draft.id,
-                    asset_type="image",
-                    url=img_url,
-                    local_path="",
-                    sort_order=0
-                ))
-                logger.info(f"Successfully generated and bound AI cover for draft #{draft.id}: {img_url}")
-        except Exception as e:
-            logger.warning(f"Skipped automatic AI cover generation for draft #{draft.id}: {e}")
+        # If no Weibo images are available or selected, use fallback strategy
+        img_url = None
+        
+        # 1. Try AI Image Generation if requested by user
+        if payload.use_ai_image:
+            try:
+                from backend.app.api.ai import _image_model_context, get_image_ai_client
+                model_config, api_key = _image_model_context(db, current_user)
+                image_ai_client = get_image_ai_client()
+                
+                paint_prompt = f"小红书风格插画，主题是：{title}。画面精美，色彩饱和，具有高度设计感与吸引力。"
+                logger.info(f"Generating automatic AI cover for draft #{draft.id} with prompt: {paint_prompt}")
+                res = image_ai_client.generate_cover(
+                    model_config=model_config,
+                    api_key=api_key,
+                    prompt=paint_prompt,
+                    size="1024x1024",
+                    style="vivid"
+                )
+                img_url = res.get("url")
+                if img_url:
+                    logger.info(f"Successfully generated and bound AI cover for draft #{draft.id}: {img_url}")
+            except Exception as e:
+                logger.warning(f"AI cover generation failed, falling back to text cover: {e}")
+                
+        # 2. Fallback: Generate a clean white-background black-text image using compose_cover_image
+        if not img_url:
+            try:
+                from uuid import uuid4
+                from pathlib import Path
+                from backend.app.core.config import get_settings
+                from backend.app.services.image_util import compose_cover_image
+                
+                # Must start with valid prefix e.g., 'xhs-upload-u{id}-' to pass security checks in files.py
+                file_name = f"xhs-upload-u{current_user.id}-{uuid4().hex}.png"
+                media_dir = Path(get_settings().storage_dir) / "media"
+                media_dir.mkdir(parents=True, exist_ok=True)
+                output_path = media_dir / file_name
+                
+                logger.info(f"Generating plain text cover image for draft #{draft.id}: {output_path}")
+                compose_cover_image(
+                    output_path=output_path,
+                    title=title,
+                    body=body[:200] + ("..." if len(body) > 200 else ""),
+                    width=1080,
+                    height=1440,
+                    background_color="#fafaf8",
+                    accent_color="#111111"
+                )
+                img_url = f"/api/files/media/{file_name}"
+                logger.info(f"Successfully generated plain text cover for draft #{draft.id}: {img_url}")
+            except Exception as e:
+                logger.error(f"Failed to generate plain text cover for draft #{draft.id}: {e}")
+                
+        # 3. Add to DraftAsset if an image URL was resolved
+        if img_url:
+            db.add(DraftAsset(
+                draft_id=draft.id,
+                asset_type="image",
+                url=img_url,
+                local_path="",
+                sort_order=0
+            ))
         
     task.payload = {**(task.payload or {}), "result_draft_id": draft.id}
     db.commit()
