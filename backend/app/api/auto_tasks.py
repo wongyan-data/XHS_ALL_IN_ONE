@@ -520,12 +520,8 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
             db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
         
-    creator_cookies = decrypt_text(creator_cv.encrypted_cookies)
-    if not isinstance(creator_cookies, str):
-        from backend.app.api.publish import _cookies_to_string
-        creator_cookies_str = _cookies_to_string(creator_cookies)
-    else:
-        creator_cookies_str = creator_cookies
+    from backend.app.api.publish import _cookies_to_string
+    creator_cookies_str = _cookies_to_string(decrypt_text(creator_cv.encrypted_cookies))
         
     creator_adapter = XhsCreatorApiAdapter(creator_cookies_str)
     file_infos = []
