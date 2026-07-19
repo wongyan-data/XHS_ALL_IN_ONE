@@ -721,60 +721,6 @@ export function XhsDraftsPage() {
                 {sourceNote.content}
               </Paragraph>
 
-              {hasImageAssets && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      <FileImageOutlined /> 图片素材 ({imageAssets.length}) — 拖拽调整顺序
-                    </Text>
-                  </div>
-                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                    <SortableContext items={imageAssets.map((a) => a.id)} strategy={horizontalListSortingStrategy}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                        {imageAssets.map((asset) => (
-                          <SortableRewriteImage
-                            key={asset.id}
-                            asset={asset}
-                            onEdit={() => { setOptimizeAssetId(asset.id); setOptimizeModalOpen(true); }}
-                            onRemove={() => handleRemoveAsset(asset.id)}
-                            onView={() => setPreviewImage(asset.url || asset.local_path)}
-                          />
-                        ))}
-                        <div
-                          onClick={() => setUploadModalOpen(true)}
-                          style={{
-                            width: 60, height: 60, borderRadius: 4, border: "1px dashed #434343",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            cursor: "pointer", background: "rgba(255,255,255,0.04)",
-                          }}
-                        >
-                          <PlusOutlined style={{ fontSize: 20, color: "#8c8c8c" }} />
-                        </div>
-                      </div>
-                    </SortableContext>
-                  </DndContext>
-                </div>
-              )}
-
-              {hasVideoAssets && (
-                <div style={{ marginBottom: 8 }}>
-                  {sourceAssets.filter((a) => a.asset_type === "video").map((asset) => (
-                    <div key={asset.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <Button
-                        type="link" size="small" icon={<PlayCircleOutlined />}
-                        href={asset.url || sourceNote.video_url} target="_blank" rel="noopener noreferrer"
-                      >
-                        查看视频
-                      </Button>
-                      <Button type="text" size="small" icon={<EditOutlined />}
-                        onClick={() => { setOptimizeAssetId(asset.id); setOptimizeModalOpen(true); }}
-                        style={{ color: "#1668dc" }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-
               <Space size={4}>
                 <Tag color={hasVideoAssets ? "purple" : "blue"}>
                   {hasVideoAssets ? "视频" : "图文"}
@@ -792,6 +738,53 @@ export function XhsDraftsPage() {
           )}
           <Card title="编辑器">
             <Form layout="vertical">
+              <Form.Item label="图片素材" style={{ marginBottom: 16 }}>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={imageAssets.map((a) => a.id)} strategy={horizontalListSortingStrategy}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                      {imageAssets.map((asset) => (
+                        <SortableRewriteImage
+                          key={asset.id}
+                          asset={asset}
+                          onEdit={() => { setOptimizeAssetId(asset.id); setOptimizeModalOpen(true); }}
+                          onRemove={() => handleRemoveAsset(asset.id)}
+                          onView={() => setPreviewImage(asset.url || asset.local_path)}
+                        />
+                      ))}
+                      <div
+                        onClick={() => setUploadModalOpen(true)}
+                        style={{
+                          width: 60, height: 60, borderRadius: 4, border: "1px dashed #434343",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", background: "rgba(255,255,255,0.04)",
+                        }}
+                      >
+                        <PlusOutlined style={{ fontSize: 20, color: "#8c8c8c" }} />
+                      </div>
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </Form.Item>
+
+              {hasVideoAssets && (
+                <Form.Item label="视频素材" style={{ marginBottom: 16 }}>
+                  {sourceAssets.filter((a) => a.asset_type === "video").map((asset) => (
+                    <div key={asset.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <Button
+                        type="link" size="small" icon={<PlayCircleOutlined />}
+                        href={asset.url || (sourceNote ? sourceNote.video_url : undefined)} target="_blank" rel="noopener noreferrer"
+                      >
+                        查看视频
+                      </Button>
+                      <Button type="text" size="small" icon={<EditOutlined />}
+                        onClick={() => { setOptimizeAssetId(asset.id); setOptimizeModalOpen(true); }}
+                        style={{ color: "#1668dc" }}
+                      />
+                    </div>
+                  ))}
+                </Form.Item>
+              )}
+
               <Form.Item label="标题" style={{ marginBottom: 16 }}>
                 <Input
                   value={title}
