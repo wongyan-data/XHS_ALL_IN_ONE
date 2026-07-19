@@ -23,6 +23,7 @@ import { XhsImageStudioPage } from "../pages/platforms/xhs/image-studio-page";
 import { XhsPublishPage } from "../pages/platforms/xhs/publish-page";
 import { XhsVideoStudioPage } from "../pages/platforms/xhs/video-studio-page";
 import { XhsSectionPage } from "../pages/platforms/xhs/xhs-section-page";
+import { WeiboHotSearchPage } from "../pages/platforms/xhs/weibo-hot-page";
 
 export function AppRouter() {
   return (
@@ -64,6 +65,7 @@ export function AppRouter() {
           <Route path="/platforms/xhs/accounts" element={<XhsAccountsPage />} />
           <Route path="/platforms/xhs/analytics" element={<XhsAnalyticsPage />} />
           <Route path="/platforms/xhs/discovery" element={<XhsDiscoveryPage />} />
+          <Route path="/platforms/xhs/weibo-hot" element={<WeiboHotSearchPage />} />
           <Route path="/platforms/xhs/crawler" element={<XhsCrawlerPage />} />
           <Route path="/platforms/xhs/keywords" element={<XhsKeywordsPage />} />
           <Route path="/platforms/xhs/library" element={<XhsLibraryPage />} />

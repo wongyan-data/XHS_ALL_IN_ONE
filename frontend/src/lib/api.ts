@@ -874,3 +874,42 @@ export async function runAutoTask(taskId: number): Promise<AutoTaskRunResult> {
   const response = await http.post<AutoTaskRunResult>(`/auto-tasks/${taskId}/run`);
   return response.data;
 }
+
+// Weibo Hot Search APIs
+export interface WeiboHotSearchItem {
+  rank: number;
+  word: string;
+  num: number;
+  label: string;
+}
+
+export interface WeiboTweet {
+  id: string;
+  text: string;
+  created_at: string;
+  author: string;
+  image_urls: string[];
+}
+
+export async function fetchWeiboHotSearch(): Promise<{ items: WeiboHotSearchItem[] }> {
+  const response = await http.get<{ items: WeiboHotSearchItem[] }>("/weibo/hot-search");
+  return response.data;
+}
+
+export async function fetchWeiboTweets(keyword: string): Promise<{ items: WeiboTweet[] }> {
+  const response = await http.get<{ items: WeiboTweet[] }>("/weibo/hot-search/tweets", {
+    params: { keyword }
+  });
+  return response.data;
+}
+
+export async function generateDraftFromWeiboHot(payload: {
+  word: string;
+  instruction?: string;
+  reference_tweets: string[];
+  image_urls: string[];
+}): Promise<{ draft_id: number; title: string }> {
+  const response = await http.post<{ draft_id: number; title: string }>("/weibo/hot-search/generate-draft", payload);
+  return response.data;
+}
+
