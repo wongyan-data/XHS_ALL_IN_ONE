@@ -272,18 +272,37 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
     
     topics = []
     if auto_task.task_type == "weibo_entertainment":
-        # Fetch Weibo Entertainment Board
-        url = 'https://weibo.com/ajax/statuses/topic_band?band_type=entertainment'
-        res = requests.get(url, headers=headers, timeout=10)
+        # Fetch Weibo Entertainment Board from s.weibo.com
+        session = _get_visitor_session()
+        url = 'https://s.weibo.com/top/summary?cate=entrank'
+        res = session.get(url, timeout=10)
         res.raise_for_status()
-        statuses = res.json().get('data', {}).get('statuses', [])
-        for item in statuses:
-            word = item.get("topic", "")
-            word_clean = word.strip("#")
+        
+        # Regex search for class td-02 td cells
+        pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=([^&"]+).*?>(.*?)</a>', re.DOTALL)
+        matches = pattern.findall(res.text)
+        
+        for idx, (q, text) in enumerate(matches):
+            word = urllib.parse.unquote(q).strip("#")
+            num = 0
+            label = ""
+            # Find span following the link inside that td block to extract category name and search volume
+            td_pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=' + re.escape(q) + r'.*?>(.*?)</a>.*?<span>(.*?)</span>', re.DOTALL)
+            td_match = td_pattern.search(res.text)
+            if td_match:
+                span_content = td_match.group(2).strip()
+                span_parts = span_content.split()
+                if span_parts:
+                    if len(span_parts) > 1 and not span_parts[0].isdigit():
+                        label = span_parts[0]
+                        num = int(span_parts[1]) if span_parts[1].isdigit() else 0
+                    elif span_parts[0].isdigit():
+                        num = int(span_parts[0])
+            
             topics.append({
-                "word": word_clean,
-                "num": item.get("read", 0),
-                "label": item.get("category", "")
+                "word": word,
+                "num": num,
+                "label": label
             })
     else:
         # Fetch Weibo Main Hot Search Board
