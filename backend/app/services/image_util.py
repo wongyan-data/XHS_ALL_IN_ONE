@@ -98,12 +98,12 @@ def compose_cover_image(
         draw.text((margin, y), line, font=title_font, fill=ink)
         y += int(title_font.size * 1.28) if hasattr(title_font, "size") else 48
 
-    if body.strip():
-        y += max(28, height // 34)
-        body_lines = _wrap_text(draw, body, body_font, width - margin * 2)[:8]
-        for line in body_lines:
-            draw.text((margin, y), line, font=body_font, fill=muted)
-            y += int(body_font.size * 1.42) if hasattr(body_font, "size") else 34
+    # if body.strip():
+    #     y += max(28, height // 34)
+    #     body_lines = _wrap_text(draw, body, body_font, width - margin * 2)[:8]
+    #     for line in body_lines:
+    #         draw.text((margin, y), line, font=body_font, fill=muted)
+    #         y += int(body_font.size * 1.42) if hasattr(body_font, "size") else 34
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG", optimize=True)

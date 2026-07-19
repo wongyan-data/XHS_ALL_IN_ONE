@@ -354,13 +354,34 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
         }
         db.flush()
         
-    # 4. Search tweets for this topic
-    session = _get_visitor_session()
-    q_encoded = urllib.parse.quote(keyword)
-    search_url = f"https://weibo.com/ajax/statuses/search?q={q_encoded}"
-    res = session.get(search_url, timeout=10)
-    res.raise_for_status()
-    statuses = res.json().get("statuses", [])
+    # 4. Search tweets for this topic (robust with session retry)
+    statuses = []
+    for attempt in range(2):
+        try:
+            session = _get_visitor_session(force_refresh=(attempt > 0))
+            q_encoded = urllib.parse.quote(keyword)
+            search_url = f"https://weibo.com/ajax/statuses/search?q={q_encoded}"
+            res = session.get(search_url, timeout=10)
+            res.raise_for_status()
+            
+            data = res.json()
+            if data.get("ok") == -100:
+                if attempt == 0:
+                    local_logger.warning("Weibo visitor session expired in auto task, retrying with fresh session...")
+                    continue
+                else:
+                    raise RuntimeError("Weibo session auth failed in auto task (-100)")
+            
+            statuses = data.get("statuses", [])
+            break
+        except Exception as e:
+            if attempt == 1:
+                local_logger.error(f"Auto task {auto_task.id} failed to fetch tweets for keyword {keyword}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"检索热搜推文失败: {e}"
+                )
+
     if not statuses:
         msg = f"未找到关于该热搜的推文背景: {keyword}"
         if tracking_task:
@@ -370,20 +391,28 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
             db.commit()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
         
-    # Extract reference material and pictures
+    # Extract reference material (first 3 tweets) and pictures (scan up to 15 tweets)
     reference_tweets = []
     selected_images = []
+    
     for s in statuses[:3]:
         text_clean = _clean_html_tags(s.get("text", ""))
         reference_tweets.append(text_clean)
         
-        # Extract images
+    for s in statuses[:15]:
         pic_ids = s.get("pic_ids") or []
         pic_infos = s.get("pic_infos") or {}
+        
+        # If this tweet is a retweet and has no pictures on the retweet text, look inside the original tweet
+        if not pic_ids and s.get("retweeted_status"):
+            retweeted = s.get("retweeted_status")
+            pic_ids = retweeted.get("pic_ids") or []
+            pic_infos = retweeted.get("pic_infos") or {}
+            
         for pid in pic_ids:
             info = pic_infos.get(pid)
             if info:
-                img_url = info.get("large", {}).get("url") or info.get("original", {}).get("url")
+                img_url = info.get("large", {}).get("url") or info.get("original", {}).get("url") or info.get("thumbnail", {}).get("url")
                 if img_url and img_url not in selected_images:
                     selected_images.append(img_url)
                     
