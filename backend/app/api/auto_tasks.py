@@ -165,13 +165,14 @@ def create_auto_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if payload.task_type == "xhs_keyword":
-        if not payload.pc_account_id:
+    if payload.task_type in ("xhs_keyword", "group_consolidation"):
+        if payload.task_type == "xhs_keyword" and not payload.pc_account_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="小红书关键词监控任务必须选择 PC 账号")
-        _verify_account_ownership(db, current_user, payload.pc_account_id, "pc")
+        if payload.pc_account_id:
+            _verify_account_ownership(db, current_user, payload.pc_account_id, "pc")
     _verify_account_ownership(db, current_user, payload.creator_account_id, "creator")
 
-    pc_id = payload.pc_account_id if payload.task_type == "xhs_keyword" else payload.creator_account_id
+    pc_id = payload.pc_account_id if payload.task_type in ("xhs_keyword", "group_consolidation") else payload.creator_account_id
 
     auto_task = AutoTask(
         user_id=current_user.id,
