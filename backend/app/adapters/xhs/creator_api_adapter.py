@@ -51,7 +51,12 @@ class XhsCreatorApiAdapter:
 
         if file_path.startswith("http://") or file_path.startswith("https://"):
             import requests
-            resp = requests.get(file_path, timeout=30, headers={"Referer": ""})
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://weibo.com/" if "sinaimg.cn" in file_path else ""
+            }
+            # verify=False is required to skip broken Sina SSL certificate warnings
+            resp = requests.get(file_path, timeout=30, headers=headers, verify=False)
             resp.raise_for_status()
             raw_bytes = resp.content
         elif file_path.startswith("/api/files/media/"):

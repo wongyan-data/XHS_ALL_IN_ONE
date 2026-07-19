@@ -4,6 +4,7 @@ import json
 import re
 import time
 import logging
+import urllib.parse
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -199,7 +200,8 @@ def get_hot_search_tweets(keyword: str) -> dict[str, Any]:
                         # Prefer large size, fallbacks
                         url = info.get("large", {}).get("url") or info.get("original", {}).get("url") or info.get("thumbnail", {}).get("url")
                         if url:
-                            image_urls.append(url)
+                            proxy_url = f"/api/weibo/hot-search/image-proxy?url={urllib.parse.quote(url)}"
+                            image_urls.append(proxy_url)
                             
                 tweets.append({
                     "id": status_item.get("idstr") or str(status_item.get("id")),
@@ -217,6 +219,32 @@ def get_hot_search_tweets(keyword: str) -> dict[str, Any]:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail=f"检索热搜推文失败: {e}"
                 )
+
+
+@router.get("/hot-search/image-proxy")
+def weibo_image_proxy(url: str):
+    import requests
+    if "sinaimg.cn" not in url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持代理新浪微博图片")
+        
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://weibo.com/'
+        }
+        # verify=False is necessary due to frequent broken certificates on Sina CDN
+        res = requests.get(url, headers=headers, verify=False, timeout=15)
+        res.raise_for_status()
+        
+        content_type = res.headers.get("Content-Type") or "image/jpeg"
+        from fastapi.responses import Response
+        return Response(content=res.content, media_type=content_type)
+    except Exception as e:
+        logger.error(f"Failed to proxy Weibo image {url}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"代理图片失败: {e}"
+        )
 
 
 @router.post("/hot-search/generate-draft")
@@ -286,10 +314,16 @@ def generate_draft_from_hot_search(
     
     # 5. Bind selected Weibo image URLs as DraftAssets
     for idx, url in enumerate(payload.image_urls[:9]):  # XHS allows up to 9 images
+        orig_url = url
+        if "/image-proxy?url=" in url:
+            parts = url.split("?url=")
+            if len(parts) > 1:
+                orig_url = urllib.parse.unquote(parts[1])
+                
         db.add(DraftAsset(
             draft_id=draft.id,
             asset_type="image",
-            url=url,
+            url=orig_url,
             local_path="",
             sort_order=idx
         ))
