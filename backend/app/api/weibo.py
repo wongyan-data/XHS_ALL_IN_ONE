@@ -313,20 +313,53 @@ def generate_draft_from_hot_search(
     db.flush()
     
     # 5. Bind selected Weibo image URLs as DraftAssets
-    for idx, url in enumerate(payload.image_urls[:9]):  # XHS allows up to 9 images
-        orig_url = url
-        if "/image-proxy?url=" in url:
-            parts = url.split("?url=")
-            if len(parts) > 1:
-                orig_url = urllib.parse.unquote(parts[1])
-                
-        db.add(DraftAsset(
-            draft_id=draft.id,
-            asset_type="image",
-            url=orig_url,
-            local_path="",
-            sort_order=idx
-        ))
+    if payload.image_urls:
+        for idx, url in enumerate(payload.image_urls[:9]):  # XHS allows up to 9 images
+            orig_url = url
+            if "/image-proxy?url=" in url:
+                parts = url.split("?url=")
+                if len(parts) > 1:
+                    orig_url = urllib.parse.unquote(parts[1])
+                    
+            db.add(DraftAsset(
+                draft_id=draft.id,
+                asset_type="image",
+                url=orig_url,
+                local_path="",
+                sort_order=idx
+            ))
+    else:
+        # If no Weibo images are available or selected, automatically generate a cover with AI
+        try:
+            from backend.app.api.ai import _image_model_context, get_image_ai_client
+            # Verify if default image model is configured
+            model_config, api_key = _image_model_context(db, current_user)
+            image_ai_client = get_image_ai_client()
+            
+            # Formulate painting prompt
+            paint_prompt = f"小红书风格插画，主题是：{title}。画面精美，色彩饱和，具有高度设计感与吸引力。"
+            
+            # Call AI draw
+            logger.info(f"Generating automatic AI cover for draft #{draft.id} with prompt: {paint_prompt}")
+            res = image_ai_client.generate_cover(
+                model_config=model_config,
+                api_key=api_key,
+                prompt=paint_prompt,
+                size="1024x1024",
+                style="vivid"
+            )
+            img_url = res.get("url")
+            if img_url:
+                db.add(DraftAsset(
+                    draft_id=draft.id,
+                    asset_type="image",
+                    url=img_url,
+                    local_path="",
+                    sort_order=0
+                ))
+                logger.info(f"Successfully generated and bound AI cover for draft #{draft.id}: {img_url}")
+        except Exception as e:
+            logger.warning(f"Skipped automatic AI cover generation for draft #{draft.id}: {e}")
         
     task.payload = {**(task.payload or {}), "result_draft_id": draft.id}
     db.commit()
