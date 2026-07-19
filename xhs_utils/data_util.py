@@ -210,15 +210,21 @@ def save_to_xlsx(datas, file_path, type='note'):
 def download_media(path, name, url, type):
     if not url:
         raise ValueError(f'{type} url is empty: {name}')
+    if url.startswith("http://"):
+        url = url.replace("http://", "https://", 1)
     file_path = Path(path) / f'{name}.{"jpg" if type == "image" else "mp4"}'
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.xiaohongshu.com/"
+    }
     if type == 'image':
-        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         content = response.content
         with open(file_path, mode="wb") as f:
             f.write(content)
     elif type == 'video':
-        res = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
+        res = requests.get(url, headers=headers, stream=True, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         size = 0
         chunk_size = 1024 * 1024

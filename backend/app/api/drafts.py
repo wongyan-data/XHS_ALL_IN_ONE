@@ -42,10 +42,24 @@ class DraftSendToPublishRequest(BaseModel):
     is_private: Optional[bool] = None
 
 
-def _clean_topics(topics: Optional[list[str]]) -> list[str]:
-    if topics is None:
+import re
+
+def _clean_topics(topics: Any) -> list[str]:
+    if not topics:
         return []
-    return [topic.strip() for topic in topics if topic and topic.strip()]
+    if isinstance(topics, str):
+        topics = [topics]
+    if not isinstance(topics, list):
+        return []
+    result = []
+    for item in topics:
+        if isinstance(item, str):
+            parts = re.split(r'[,\s#，]+', item)
+            for part in parts:
+                cleaned = part.strip()
+                if cleaned:
+                    result.append(cleaned)
+    return result
 
 
 def _build_publish_options(payload: DraftSendToPublishRequest) -> dict[str, Any]:
@@ -269,9 +283,18 @@ def delete_draft(
     draft = db.get(AiDraft, draft_id)
     if draft is None or draft.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
-    db.execute(select(DraftAsset).where(DraftAsset.draft_id == draft.id))
+
+    from sqlalchemy import update
+    from backend.app.models import AiGeneratedAsset
+
+    # Unbind draft from publish jobs and generated assets to prevent foreign key errors
+    db.execute(update(PublishJob).where(PublishJob.source_draft_id == draft.id).values(source_draft_id=None))
+    db.execute(update(AiGeneratedAsset).where(AiGeneratedAsset.draft_id == draft.id).values(draft_id=None))
+
+    # Delete draft assets
     for asset in db.scalars(select(DraftAsset).where(DraftAsset.draft_id == draft.id)).all():
         db.delete(asset)
+
     db.delete(draft)
     db.commit()
     return {"id": draft_id, "status": "deleted"}

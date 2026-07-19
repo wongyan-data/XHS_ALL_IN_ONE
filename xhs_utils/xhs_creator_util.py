@@ -99,6 +99,7 @@ def get_common_headers():
     return  {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
         "accept": "application/json, text/plain, */*",
+        "content-type": "application/json;charset=UTF-8",
         "Host": "edith.xiaohongshu.com",
         "pragma": "no-cache",
         "cache-control": "no-cache",

@@ -45,11 +45,10 @@ class XHS_Creator_Apis():
                     "page": 1
                 }
             }
+            data_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
             headers = get_common_headers()
-            headers.update(generate_xsc(cookies['a1'], api, data))
-            if data:
-                data = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
-            response = requests.post(self.edith_url + api, headers=headers, cookies=cookies, data=data.encode('utf-8'), timeout=REQUEST_TIMEOUT)
+            headers.update(generate_xsc(cookies['a1'], api, data_str))
+            response = requests.post(self.edith_url + api, headers=headers, cookies=cookies, data=data_str.encode('utf-8'), timeout=REQUEST_TIMEOUT)
             res_json = response.json()
             success, msg = res_json["success"], res_json["msg"]
         except Exception as e:
@@ -61,12 +60,11 @@ class XHS_Creator_Apis():
         try:
             data = get_loc_data(keyword)
             api = "/web_api/sns/v1/local/poi/creator/search"
+            data_str = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
             headers = get_search_location_headers()
-            h = generate_xsc(cookies['a1'], api, data)
+            h = generate_xsc(cookies['a1'], api, data_str)
             headers.update(h)
-            if data:
-                data = json.dumps(data, separators=(',', ':'), ensure_ascii=False)
-            response = requests.post(self.edith_url + api, headers=headers, cookies=cookies, data=data.encode('utf-8'), timeout=REQUEST_TIMEOUT)
+            response = requests.post(self.edith_url + api, headers=headers, cookies=cookies, data=data_str.encode('utf-8'), timeout=REQUEST_TIMEOUT)
             res_json = response.json()
             success, msg = res_json["success"], res_json["msg"]
         except Exception as e:
@@ -198,12 +196,25 @@ class XHS_Creator_Apis():
         return success, msg, res_json
 
 
+    @staticmethod
+    def strip_markdown(text: str) -> str:
+        if not text:
+            return text
+        import re
+        text = re.sub(r'(\*\*|__)(.*?)\1', r'\2', text)
+        text = re.sub(r'(\*|_)(.*?)\1', r'\2', text)
+        text = re.sub(r'(?m)^#{1,6}\s+', '', text)
+        text = re.sub(r'(?m)^[-*]\s+', '• ', text)
+        text = re.sub(r'`(.*?)`', r'\1', text)
+        return text
+
     def post_note(self, noteInfo, cookies_str):
         post_api = "/web_api/sns/v2/note"
         headers = get_post_note_headers()
         cookies = trans_cookies(cookies_str)
         title = noteInfo.get('title', '')
         desc = noteInfo.get('desc', '')
+        desc = self.strip_markdown(desc)
         postTime = noteInfo.get('postTime')
         location = noteInfo.get('location')
         privacy_type = noteInfo.get('type', 1)
@@ -272,9 +283,31 @@ class XHS_Creator_Apis():
             success, msg, res_json = self.get_topic(topic, cookies)
             if not success:
                 raise Exception(msg)
-            if len(res_json['data']['topic_info_dtos']) == 0:
-                raise Exception(f'未找到话题{topic}')
-            insert_topic = res_json['data']['topic_info_dtos'][0]
+            
+            topic_list = res_json.get('data', {}).get('topic_info_dtos', [])
+            if len(topic_list) == 0:
+                logger.warning(f"未找到话题 {topic}，已跳过")
+                continue
+            
+            insert_topic = None
+            # 1. 尝试精确匹配（忽略大小写）
+            for t in topic_list:
+                if t.get('name', '').lower() == topic.lower():
+                    insert_topic = t
+                    break
+
+            # 2. 尝试模糊包含匹配
+            if not insert_topic:
+                for t in topic_list:
+                    if topic.lower() in t.get('name', '').lower():
+                        insert_topic = t
+                        break
+            
+            # 3. 实在没有匹配到，直接跳过，绝对不用第一名兜底
+            if not insert_topic:
+                logger.warning(f"小红书返回的热门话题中未包含 {topic}，为防止被硬塞无关标签，已跳过此标签")
+                continue
+
             insert_topic = {
                 "id": insert_topic['id'],
                 "link": insert_topic['link'],

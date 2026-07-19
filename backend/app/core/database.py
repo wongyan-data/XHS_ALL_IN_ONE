@@ -111,6 +111,20 @@ def _normalize_sqlite_datetime_storage(bind) -> None:
         "keyword_groups": ["created_at", "updated_at"],
         "api_logs": ["created_at"],
     }
+
+    # Inspect schema OUTSIDE the write transaction to prevent deadlocks
+    inspector = inspect(bind)
+    table_names = set(inspector.get_table_names())
+    
+    # Pre-fetch columns for relevant tables before locking the DB
+    table_columns = {}
+    for table_name in table_names:
+        if table_name in datetime_columns or table_name == "publish_jobs":
+            try:
+                table_columns[table_name] = {col["name"] for col in inspector.get_columns(table_name)}
+            except Exception:
+                table_columns[table_name] = set()
+
     with bind.begin() as connection:
         connection.execute(
             text(
@@ -122,13 +136,11 @@ def _normalize_sqlite_datetime_storage(bind) -> None:
             text("SELECT name FROM app_migrations WHERE name = 'sqlite_datetime_asia_shanghai_v1'")
         ).first()
 
-        inspector = inspect(bind)
-        table_names = set(inspector.get_table_names())
         if not applied:
             for table_name, column_names in datetime_columns.items():
                 if table_name not in table_names:
                     continue
-                existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+                existing_columns = table_columns.get(table_name, set())
                 for column_name in column_names:
                     if column_name not in existing_columns:
                         continue
@@ -142,10 +154,13 @@ def _normalize_sqlite_datetime_storage(bind) -> None:
         ).first()
         if scheduled_at_applied:
             return
-        if "publish_jobs" in table_names and "scheduled_at" in {column["name"] for column in inspector.get_columns("publish_jobs")}:
-            connection.execute(
-                text("UPDATE publish_jobs SET scheduled_at = datetime(scheduled_at, '+8 hours') WHERE scheduled_at IS NOT NULL")
-            )
+        
+        if "publish_jobs" in table_names:
+            existing_columns = table_columns.get("publish_jobs", set())
+            if "scheduled_at" in existing_columns:
+                connection.execute(
+                    text("UPDATE publish_jobs SET scheduled_at = datetime(scheduled_at, '+8 hours') WHERE scheduled_at IS NOT NULL")
+                )
         connection.execute(text("INSERT INTO app_migrations (name) VALUES ('sqlite_publish_scheduled_at_asia_shanghai_v1')"))
 
 

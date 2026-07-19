@@ -101,9 +101,22 @@ def _load_publish_options(job: PublishJob) -> dict[str, Any]:
 
 
 def _clean_topics(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = [value]
     if not isinstance(value, list):
         return []
-    return [topic.strip() for topic in value if isinstance(topic, str) and topic.strip()]
+    import re
+    result = []
+    for item in value:
+        if isinstance(item, str):
+            parts = re.split(r'[,\s#，]+', item)
+            for part in parts:
+                cleaned = part.strip()
+                if cleaned:
+                    result.append(cleaned)
+    return result
 
 
 def _apply_publish_options(note_info: dict[str, Any], options: dict[str, Any]) -> None:

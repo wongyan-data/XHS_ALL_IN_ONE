@@ -1,4 +1,15 @@
 import os
+
+# Bypass system proxy for Xiaohongshu domains to prevent SSL/EOF/WAF blocks
+for env_key in ['no_proxy', 'NO_PROXY']:
+    existing = os.environ.get(env_key, '')
+    if existing:
+        # Check if domains are already listed to avoid duplicates
+        if 'xiaohongshu.com' not in existing:
+            os.environ[env_key] = existing + ',xiaohongshu.com,xhscdn.com'
+    else:
+        os.environ[env_key] = 'xiaohongshu.com,xhscdn.com'
+
 import time
 import random
 import hashlib

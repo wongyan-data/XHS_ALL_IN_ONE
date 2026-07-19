@@ -161,10 +161,23 @@ def _scheduled_post_time(publish_mode: str, scheduled_at: Optional[datetime]) ->
     return int(scheduled_at.timestamp() * 1000)
 
 
-def _clean_topics(topics: Optional[list[str]]) -> list[str]:
-    if topics is None:
+def _clean_topics(topics: Any) -> list[str]:
+    if not topics:
         return []
-    return [topic.strip() for topic in topics if topic and topic.strip()]
+    if isinstance(topics, str):
+        topics = [topics]
+    if not isinstance(topics, list):
+        return []
+    import re
+    result = []
+    for item in topics:
+        if isinstance(item, str):
+            parts = re.split(r'[,\s#，]+', item)
+            for part in parts:
+                cleaned = part.strip()
+                if cleaned:
+                    result.append(cleaned)
+    return result
 
 
 def _apply_publish_options(note_info: dict[str, Any], payload: CreatorImagePublishRequest | CreatorVideoPublishRequest) -> None:

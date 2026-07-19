@@ -1160,7 +1160,10 @@ export function XhsDraftsPage() {
                         <Tag
                           key={tag.id || tag.name}
                           closable
-                          onClose={() => setDraftTags((prev) => prev.filter((t) => t.name !== tag.name))}
+                          onClose={(e) => {
+                            e.preventDefault();
+                            setDraftTags((prev) => prev.filter((t) => t.name !== tag.name));
+                          }}
                           color="blue"
                         >
                           #{tag.name}

@@ -41,10 +41,23 @@ def get_creator_publish_adapter_factory():
     return XhsCreatorApiAdapter
 
 
-def _clean_topics(topics: Optional[list[str]]) -> list[str]:
-    if topics is None:
+def _clean_topics(topics: Any) -> list[str]:
+    if not topics:
         return []
-    return [topic.strip() for topic in topics if topic and topic.strip()]
+    if isinstance(topics, str):
+        topics = [topics]
+    if not isinstance(topics, list):
+        return []
+    import re
+    result = []
+    for item in topics:
+        if isinstance(item, str):
+            parts = re.split(r'[,\s#，]+', item)
+            for part in parts:
+                cleaned = part.strip()
+                if cleaned:
+                    result.append(cleaned)
+    return result
 
 
 def _load_publish_options(job: PublishJob) -> dict[str, Any]:
