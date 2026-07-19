@@ -596,7 +596,7 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
             "desc": job.body,
             "media_type": "image",
             "image_file_infos": file_infos,
-            "type": 1,
+            "type": 0,
             "postTime": None,
         }
         result = creator_adapter.post_note(note_info)

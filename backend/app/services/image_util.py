@@ -62,6 +62,16 @@ def compose_cover_image(
     background_color: str,
     accent_color: str,
 ) -> None:
+    import re
+    # Clean text to strip emojis so they don't render as square boxes (e.g. 🆘, 😂, 😱, ✨)
+    title = re.sub(r'[\U00010000-\U0010ffff]', '', title)
+    title = re.sub(r'[\u2600-\u27bf]', '', title)
+    title = re.sub(r'[\u200d\ufe0f]', '', title)
+    
+    body = re.sub(r'[\U00010000-\U0010ffff]', '', body)
+    body = re.sub(r'[\u2600-\u27bf]', '', body)
+    body = re.sub(r'[\u200d\ufe0f]', '', body)
+
     background = _parse_hex_color(background_color, (250, 250, 248))
     accent = _parse_hex_color(accent_color, (17, 17, 17))
     ink = (17, 17, 17)
@@ -94,11 +104,6 @@ def compose_cover_image(
         for line in body_lines:
             draw.text((margin, y), line, font=body_font, fill=muted)
             y += int(body_font.size * 1.42) if hasattr(body_font, "size") else 34
-
-    footer = "Spider_XHS · XHS cover utility"
-    footer_y = height - margin - max(22, height // 60)
-    draw.text((margin, footer_y), footer, font=footer_font, fill=muted)
-    draw.line((margin, footer_y - 18, width - margin, footer_y - 18), fill=(224, 224, 220), width=1)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, format="PNG", optimize=True)

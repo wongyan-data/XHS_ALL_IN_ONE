@@ -600,7 +600,7 @@ def _execute_auto_task_background(db: Session, task: AutoTask) -> None:
             "desc": job.body,
             "media_type": "image",
             "image_file_infos": file_infos,
-            "type": 1,
+            "type": 0,
             "postTime": None,
         }
         result = creator_adapter.post_note(note_info)
