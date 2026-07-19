@@ -36,8 +36,9 @@ router = APIRouter(prefix="/auto-tasks", tags=["auto-tasks"])
 
 class AutoTaskCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    keywords: list[str] = Field(min_length=1)
-    pc_account_id: int
+    keywords: list[str] = Field(default_factory=list)
+    task_type: str = Field(default="xhs_keyword", pattern="^(xhs_keyword|weibo_hot|weibo_entertainment)$")
+    pc_account_id: Optional[int] = None
     creator_account_id: int
     ai_instruction: str = Field(default="", max_length=2000)
     schedule_type: str = Field(default="manual", pattern="^(manual|daily|weekly|interval)$")
@@ -49,6 +50,7 @@ class AutoTaskCreateRequest(BaseModel):
 class AutoTaskUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     keywords: Optional[list[str]] = None
+    task_type: Optional[str] = Field(default=None, pattern="^(xhs_keyword|weibo_hot|weibo_entertainment)$")
     ai_instruction: Optional[str] = Field(default=None, max_length=2000)
     status: Optional[str] = Field(default=None, pattern="^(active|paused|completed)$")
     schedule_type: Optional[str] = Field(default=None, pattern="^(manual|daily|weekly|interval)$")
@@ -62,6 +64,7 @@ def _serialize_auto_task(task: AutoTask) -> dict[str, Any]:
         "id": task.id,
         "user_id": task.user_id,
         "name": task.name,
+        "task_type": getattr(task, "task_type", "xhs_keyword"),
         "keywords": task.keywords or [],
         "pc_account_id": task.pc_account_id,
         "creator_account_id": task.creator_account_id,
@@ -162,14 +165,20 @@ def create_auto_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _verify_account_ownership(db, current_user, payload.pc_account_id, "pc")
+    if payload.task_type == "xhs_keyword":
+        if not payload.pc_account_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="小红书关键词监控任务必须选择 PC 账号")
+        _verify_account_ownership(db, current_user, payload.pc_account_id, "pc")
     _verify_account_ownership(db, current_user, payload.creator_account_id, "creator")
+
+    pc_id = payload.pc_account_id if payload.task_type == "xhs_keyword" else payload.creator_account_id
 
     auto_task = AutoTask(
         user_id=current_user.id,
         name=payload.name,
+        task_type=payload.task_type,
         keywords=payload.keywords,
-        pc_account_id=payload.pc_account_id,
+        pc_account_id=pc_id,
         creator_account_id=payload.creator_account_id,
         ai_instruction=payload.ai_instruction,
         schedule_type=payload.schedule_type,
@@ -196,6 +205,8 @@ def update_auto_task(
 
     if payload.name is not None:
         auto_task.name = payload.name
+    if payload.task_type is not None:
+        auto_task.task_type = payload.task_type
     if payload.keywords is not None:
         auto_task.keywords = payload.keywords
     if payload.ai_instruction is not None:
@@ -236,6 +247,395 @@ def delete_auto_task(
     return {"id": task_id, "status": "deleted"}
 
 
+def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Optional[Task] = None) -> dict[str, Any]:
+    import random
+    import requests
+    import urllib.parse
+    import json
+    import re
+    import logging
+    from backend.app.services.ai_service import OpenAICompatibleTextClient
+    from backend.app.api.weibo import _clean_html_tags, _get_visitor_session, _strip_markdown
+    from backend.app.models import AiDraft, PublishJob, PublishAsset, DraftAsset, AccountCookieVersion, ModelConfig
+    from backend.app.core.time import shanghai_now
+    from backend.app.core.security import decrypt_text
+    from backend.app.adapters.xhs.creator_api_adapter import XhsCreatorApiAdapter
+    
+    local_logger = logging.getLogger(__name__)
+
+    # 1. Fetch Weibo Hot Search or Entertainment Board
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://s.weibo.com/',
+        'Accept': 'application/json'
+    }
+    
+    topics = []
+    if auto_task.task_type == "weibo_entertainment":
+        # Fetch Weibo Entertainment Board
+        url = 'https://weibo.com/ajax/statuses/topic_band?band_type=entertainment'
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        statuses = res.json().get('data', {}).get('statuses', [])
+        for item in statuses:
+            word = item.get("topic", "")
+            word_clean = word.strip("#")
+            topics.append({
+                "word": word_clean,
+                "num": item.get("read", 0),
+                "label": item.get("category", "")
+            })
+    else:
+        # Fetch Weibo Main Hot Search Board
+        url = 'https://weibo.com/ajax/side/hotSearch'
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        realtime = res.json().get('data', {}).get('realtime', [])
+        for item in realtime:
+            if item.get('is_ad') or item.get('flag') == 1:
+                continue
+            topics.append({
+                "word": item.get("word", ""),
+                "num": item.get("num", 0),
+                "label": item.get("label_name", "").strip() or item.get("flag_desc", "").strip()
+            })
+
+    # 2. Filter topics based on keywords
+    keywords = auto_task.keywords or []
+    matched_topics = []
+    if keywords:
+        for t in topics:
+            word_lower = t["word"].lower()
+            label_lower = t["label"].lower() if t["label"] else ""
+            if any(k.lower() in word_lower or k.lower() in label_lower for k in keywords):
+                matched_topics.append(t)
+    else:
+        # If no keywords are configured, match all
+        matched_topics = topics
+        
+    if not matched_topics:
+        msg = "没有匹配当前关键词/分类过滤器的微博热搜"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+        
+    # 3. Pick the top-ranking topic (first item after filtering)
+    best_topic = matched_topics[0]
+    keyword = best_topic["word"]
+    
+    if tracking_task:
+        tracking_task.progress = 30
+        tracking_task.payload = {
+            **(tracking_task.payload or {}),
+            "keyword": keyword,
+            "topic_label": best_topic["label"]
+        }
+        db.flush()
+        
+    # 4. Search tweets for this topic
+    session = _get_visitor_session()
+    q_encoded = urllib.parse.quote(keyword)
+    search_url = f"https://weibo.com/ajax/statuses/search?q={q_encoded}"
+    res = session.get(search_url, timeout=10)
+    res.raise_for_status()
+    statuses = res.json().get("statuses", [])
+    if not statuses:
+        msg = f"未找到关于该热搜的推文背景: {keyword}"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+        
+    # Extract reference material and pictures
+    reference_tweets = []
+    selected_images = []
+    for s in statuses[:3]:
+        text_clean = _clean_html_tags(s.get("text", ""))
+        reference_tweets.append(text_clean)
+        
+        # Extract images
+        pic_ids = s.get("pic_ids") or []
+        pic_infos = s.get("pic_infos") or {}
+        for pid in pic_ids:
+            info = pic_infos.get(pid)
+            if info:
+                img_url = info.get("large", {}).get("url") or info.get("original", {}).get("url")
+                if img_url and img_url not in selected_images:
+                    selected_images.append(img_url)
+                    
+    reference_material = "\n\n".join(
+        f"微博参考内容 {idx+1}:\n{tweet}" 
+        for idx, tweet in enumerate(reference_tweets)
+    )
+    
+    if tracking_task:
+        tracking_task.progress = 50
+        db.flush()
+        
+    # 5. Call AI text client to rewrite title & body
+    model_config = db.scalars(
+        select(ModelConfig).where(
+            ModelConfig.user_id == auto_task.user_id,
+            ModelConfig.model_type == "text",
+            ModelConfig.is_default.is_(True),
+        )
+    ).first()
+    if model_config is None:
+        msg = "未配置默认文本模型"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+        
+    api_key = decrypt_text(model_config.encrypted_api_key) if model_config.encrypted_api_key else ""
+    text_client = OpenAICompatibleTextClient()
+    
+    ai_instruction = auto_task.ai_instruction or (
+        "将此热搜主题改写为一篇吸引人的小红书图文笔记。风格活泼、口语化，"
+        "使用大量适宜的表情符号（Emoji）增加趣味，并自动推荐3-5个小红书话题。"
+    )
+    
+    ai_result = text_client.generate_note(
+        model_config=model_config,
+        api_key=api_key,
+        topic=keyword,
+        reference=reference_material,
+        instruction=ai_instruction,
+    )
+    
+    raw_body = ai_result.get("body") or ""
+    raw_title = ai_result.get("title") or keyword
+    
+    # Parse tags from raw body before stripping
+    raw_tags = re.findall(r'#([^\s#，,]+)', raw_body)
+    tags = []
+    seen_tags = set()
+    for t in raw_tags:
+        cleaned = t.strip()
+        if cleaned and cleaned not in seen_tags:
+            seen_tags.add(cleaned)
+            tags.append({"id": "", "name": cleaned})
+            
+    body = _strip_markdown(raw_body)
+    title = _strip_markdown(raw_title)
+    
+    # Create AiDraft
+    draft = AiDraft(
+        user_id=auto_task.user_id,
+        platform="xhs",
+        title=title,
+        body=body,
+        tags=tags,
+    )
+    db.add(draft)
+    db.flush()
+    
+    if tracking_task:
+        tracking_task.progress = 70
+        tracking_task.payload = {**(tracking_task.payload or {}), "draft_id": draft.id}
+        db.flush()
+        
+    # 6. Fallback cover generation if no images
+    img_urls = []
+    if selected_images:
+        img_urls = selected_images[:9]
+    else:
+        # Generate cover (prefer AI, fallback to PIL plain text cover)
+        ai_img_url = None
+        try:
+            from backend.app.api.ai import _image_model_context, get_image_ai_client
+            img_model_config, img_api_key = _image_model_context(db, auto_task.user_id)
+            image_ai_client = get_image_ai_client()
+            paint_prompt = f"小红书风格插画，主题是：{title}。画面精美，色彩饱和，具有高度设计感与吸引力。"
+            res = image_ai_client.generate_cover(
+                model_config=img_model_config,
+                api_key=img_api_key,
+                prompt=paint_prompt,
+                size="1024x1024",
+                style="vivid"
+            )
+            ai_img_url = res.get("url")
+        except Exception as e:
+            local_logger.warning(f"Auto task {auto_task.id} AI image generation failed: {e}")
+            
+        # Draw PIL text cover if AI image fails
+        if not ai_img_url:
+            try:
+                from uuid import uuid4
+                from pathlib import Path
+                from backend.app.core.config import get_settings
+                from backend.app.services.image_util import compose_cover_image
+                
+                file_name = f"xhs-upload-u{auto_task.user_id}-{uuid4().hex}.png"
+                media_dir = Path(get_settings().storage_dir) / "media"
+                media_dir.mkdir(parents=True, exist_ok=True)
+                output_path = media_dir / file_name
+                
+                compose_cover_image(
+                    output_path=output_path,
+                    title=title,
+                    body=body[:200] + ("..." if len(body) > 200 else ""),
+                    width=1080,
+                    height=1440,
+                    background_color="#fafaf8",
+                    accent_color="#111111"
+                )
+                ai_img_url = f"/api/files/media/{file_name}"
+            except Exception as e:
+                local_logger.error(f"Auto task {auto_task.id} PIL cover draw failed: {e}")
+                
+        if ai_img_url:
+            img_urls = [ai_img_url]
+            
+    # Save image assets to Draft
+    for idx, url in enumerate(img_urls):
+        db.add(DraftAsset(
+            draft_id=draft.id,
+            asset_type="image",
+            url=url,
+            local_path="",
+            sort_order=idx
+        ))
+    db.flush()
+    
+    # 7. Get Creator cookies & Upload assets to Creator API
+    creator_cv = db.scalars(
+        select(AccountCookieVersion)
+        .where(AccountCookieVersion.platform_account_id == auto_task.creator_account_id)
+        .order_by(AccountCookieVersion.created_at.desc())
+    ).first()
+    if not creator_cv:
+        msg = "Creator 账号未绑定 Cookies，请先在网页端登录"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+        
+    creator_cookies = decrypt_text(creator_cv.encrypted_cookies)
+    if not isinstance(creator_cookies, str):
+        from backend.app.api.publish import _cookies_to_string
+        creator_cookies_str = _cookies_to_string(creator_cookies)
+    else:
+        creator_cookies_str = creator_cookies
+        
+    creator_adapter = XhsCreatorApiAdapter(creator_cookies_str)
+    file_infos = []
+    for url in img_urls:
+        try:
+            payload = creator_adapter.upload_media(url, "image")
+            file_infos.append(payload)
+        except Exception as exc:
+            local_logger.warning(f"Auto task {auto_task.id} image upload failed: {exc}")
+            
+    if not file_infos:
+        msg = "无法将任何配图上传至小红书创作者后台"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg)
+        
+    # 8. Create PublishJob & Publish Assets
+    job = PublishJob(
+        user_id=auto_task.user_id,
+        platform_account_id=auto_task.creator_account_id,
+        source_draft_id=draft.id,
+        platform="xhs",
+        title=draft.title,
+        body=draft.body,
+        publish_mode="immediate",
+        status="publishing",
+    )
+    db.add(job)
+    db.flush()
+    
+    for info in file_infos:
+        db.add(PublishAsset(
+            publish_job_id=job.id,
+            asset_type="image",
+            file_path="",
+            upload_status="uploaded",
+            creator_media_id=info.get("fileIds", ""),
+            creator_upload_info=json.dumps(info, ensure_ascii=False),
+        ))
+    db.flush()
+    
+    if tracking_task:
+        tracking_task.progress = 90
+        db.flush()
+        
+    # 9. Post Note
+    try:
+        note_info = {
+            "title": job.title,
+            "desc": job.body,
+            "media_type": "image",
+            "image_file_infos": file_infos,
+            "type": 1,
+            "postTime": None,
+        }
+        result = creator_adapter.post_note(note_info)
+        job.status = "published"
+        job.external_note_id = ""
+        for key in ("note_id", "noteId", "id"):
+            v = result.get(key) or (result.get("data", {}) or {}).get(key)
+            if v:
+                job.external_note_id = str(v)
+                break
+        job.published_at = shanghai_now()
+    except Exception as exc:
+        job.status = "failed"
+        job.publish_error = str(exc)[:500]
+        local_logger.warning(f"Auto task {auto_task.id} publish failed: {exc}")
+        
+    auto_task.total_published = (auto_task.total_published or 0) + 1
+    auto_task.last_run_at = shanghai_now()
+    _calculate_next_run_at(auto_task)
+    
+    if tracking_task:
+        tracking_task.status = "completed"
+        tracking_task.progress = 100
+        tracking_task.payload = {
+            **(tracking_task.payload or {}),
+            "publish_job_id": job.id,
+            "rewritten_length": len(body),
+        }
+        
+    db.commit()
+    return {
+        "auto_task": _serialize_auto_task(auto_task),
+        "keyword": keyword,
+        "source_note": {
+            "note_id": keyword,
+            "title": keyword,
+            "likes": 0,
+            "collects": 0,
+            "comments": 0,
+        },
+        "draft": {
+            "id": draft.id,
+            "title": draft.title,
+            "body": draft.body,
+            "created_at": draft.created_at.isoformat(),
+        },
+        "publish_job": {
+            "id": job.id,
+            "status": job.status,
+            "platform_account_id": job.platform_account_id,
+        },
+    }
+
+
 @router.post("/{task_id}/run")
 def run_auto_task(
     task_id: int,
@@ -245,8 +645,9 @@ def run_auto_task(
 ):
     auto_task = _get_owned_auto_task(db, current_user, task_id)
 
-    # Verify account ownership
-    _verify_account_ownership(db, current_user, auto_task.pc_account_id, "pc")
+    # Verify account ownership (Weibo tasks don't need pc accounts checks)
+    if auto_task.task_type == "xhs_keyword":
+        _verify_account_ownership(db, current_user, auto_task.pc_account_id, "pc")
     _verify_account_ownership(db, current_user, auto_task.creator_account_id, "creator")
 
     # Create a tracking task
@@ -260,6 +661,10 @@ def run_auto_task(
     )
     db.add(tracking_task)
     db.flush()
+
+    # Route according to task_type
+    if auto_task.task_type in ("weibo_hot", "weibo_entertainment"):
+        return _execute_weibo_auto_task(db, auto_task, tracking_task)
 
     # 1. Pick a random keyword
     keywords = auto_task.keywords or []

@@ -39,6 +39,20 @@ def init_db(bind=engine) -> None:
     _run_alembic_migrations()
     _normalize_model_config_names(bind)
     _normalize_sqlite_datetime_storage(bind)
+    _add_auto_task_type_column(bind)
+
+
+def _add_auto_task_type_column(bind) -> None:
+    inspector = inspect(bind)
+    table_names = set(inspector.get_table_names())
+    if "auto_tasks" not in table_names:
+        return
+
+    columns = [col["name"] for col in inspector.get_columns("auto_tasks")]
+    if "task_type" not in columns:
+        with bind.begin() as connection:
+            connection.execute(text("ALTER TABLE auto_tasks ADD COLUMN task_type VARCHAR(32) DEFAULT 'xhs_keyword'"))
+
 
 
 def _run_alembic_migrations() -> None:

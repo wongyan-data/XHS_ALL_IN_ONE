@@ -79,6 +79,7 @@ export function AutoOpsPage() {
   // Create form state
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createTaskType, setCreateTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment">("xhs_keyword");
   const [createKeywords, setCreateKeywords] = useState("");
   const [createPcAccountId, setCreatePcAccountId] = useState<number | null>(null);
   const [createCreatorAccountId, setCreateCreatorAccountId] = useState<number | null>(null);
@@ -92,6 +93,7 @@ export function AutoOpsPage() {
   // Edit modal state
   const [editTask, setEditTask] = useState<AutoTask | null>(null);
   const [editName, setEditName] = useState("");
+  const [editTaskType, setEditTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment">("xhs_keyword");
   const [editKeywords, setEditKeywords] = useState("");
   const [editInstruction, setEditInstruction] = useState("");
   const [editScheduleType, setEditScheduleType] = useState("manual");
@@ -135,18 +137,24 @@ export function AutoOpsPage() {
 
   async function handleCreate() {
     const keywords = parseKeywords(createKeywords);
-    if (!createName.trim() || keywords.length === 0 || !createPcAccountId || !createCreatorAccountId) {
-      setError("请填写任务名称、至少一个关键词，并选择 PC 和 Creator 账号。");
+    if (!createName.trim() || !createCreatorAccountId) {
+      setError("请填写任务名称，并选择用于发布的 Creator 账号。");
       return;
     }
+    if (createTaskType === "xhs_keyword" && (!createPcAccountId || keywords.length === 0)) {
+      setError("小红书关键词监控任务必须选择 PC 账号，并填写至少一个关键词。");
+      return;
+    }
+
     setIsCreating(true);
     setError(null);
     setMessage(null);
     try {
       const created = await createAutoTask({
         name: createName.trim(),
+        task_type: createTaskType,
         keywords,
-        pc_account_id: createPcAccountId,
+        pc_account_id: createTaskType === "xhs_keyword" ? createPcAccountId : null,
         creator_account_id: createCreatorAccountId,
         ai_instruction: createInstruction,
         schedule_type: createScheduleType as "manual" | "daily" | "weekly" | "interval",
@@ -157,6 +165,7 @@ export function AutoOpsPage() {
       setTasks((prev) => [created, ...prev]);
       setShowCreate(false);
       setCreateName("");
+      setCreateTaskType("xhs_keyword");
       setCreateKeywords("");
       setCreatePcAccountId(null);
       setCreateCreatorAccountId(null);
@@ -221,6 +230,7 @@ export function AutoOpsPage() {
   function openEdit(task: AutoTask) {
     setEditTask(task);
     setEditName(task.name);
+    setEditTaskType(task.task_type as any || "xhs_keyword");
     setEditKeywords((task.keywords || []).join("\n"));
     setEditInstruction(task.ai_instruction);
     setEditScheduleType(task.schedule_type || "manual");
@@ -238,7 +248,8 @@ export function AutoOpsPage() {
       const keywords = parseKeywords(editKeywords);
       const updated = await updateAutoTask(editTask.id, {
         name: editName.trim() || undefined,
-        keywords: keywords.length > 0 ? keywords : undefined,
+        task_type: editTaskType,
+        keywords: keywords,
         ai_instruction: editInstruction,
         schedule_type: editScheduleType as "manual" | "daily" | "weekly" | "interval",
         schedule_time: editScheduleTime,
@@ -320,24 +331,39 @@ export function AutoOpsPage() {
                 title={
                   <Space>
                     <ThunderboltOutlined style={{ color: task.status === "active" ? "#52c41a" : "#8c8c8c" }} />
-                    <Text ellipsis style={{ maxWidth: 180 }}>
+                    <Text ellipsis style={{ maxWidth: 160 }}>
                       {task.name}
                     </Text>
                   </Space>
                 }
-                extra={getStatusTag(task.status)}
+                extra={
+                  <Space>
+                    {task.task_type === "weibo_entertainment" ? (
+                      <Tag color="magenta">微博文娱热搜</Tag>
+                    ) : task.task_type === "weibo_hot" ? (
+                      <Tag color="orange">微博热搜</Tag>
+                    ) : (
+                      <Tag color="cyan">小红书关键词</Tag>
+                    )}
+                    {getStatusTag(task.status)}
+                  </Space>
+                }
               >
                 {/* Keywords */}
                 <div style={{ marginBottom: 12 }}>
                   <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
-                    关键词
+                    {task.task_type === "xhs_keyword" ? "关键词" : "关键词/分类过滤"}
                   </Text>
                   <Space size={4} wrap>
-                    {(task.keywords || []).map((kw) => (
-                      <Tag key={kw} color="blue">
-                        {kw}
-                      </Tag>
-                    ))}
+                    {task.keywords && task.keywords.length > 0 ? (
+                      task.keywords.map((kw) => (
+                        <Tag key={kw} color="blue">
+                          {kw}
+                        </Tag>
+                      ))
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, fontStyle: "italic" }}>匹配全部热搜</Text>
+                    )}
                   </Space>
                 </div>
 
@@ -490,7 +516,20 @@ export function AutoOpsPage() {
         >
           <Form layout="vertical">
             <Row gutter={16}>
-              <Col xs={24} md={12}>
+              <Col xs={24} md={8}>
+                <Form.Item label="任务类型" required>
+                  <Select
+                    value={createTaskType}
+                    onChange={(v) => setCreateTaskType(v as any)}
+                    options={[
+                      { value: "xhs_keyword", label: "小红书关键词监控" },
+                      { value: "weibo_hot", label: "微博实时热搜监控" },
+                      { value: "weibo_entertainment", label: "微博文娱热搜监控" },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
                 <Form.Item label="任务名称" required>
                   <Input
                     placeholder="如：低卡早餐自动发布"
@@ -500,33 +539,35 @@ export function AutoOpsPage() {
                   />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={12}>
-                <Form.Item label="关键词（每行一个）" required>
+              <Col xs={24} md={8}>
+                <Form.Item label={createTaskType === "xhs_keyword" ? "关键词（每行一个）" : "关键词/分类过滤（每行一个，非必填）"} required={createTaskType === "xhs_keyword"}>
                   <TextArea
-                    placeholder={"低卡早餐\n减脂食谱\n健康饮食"}
+                    placeholder={createTaskType === "xhs_keyword" ? "低卡早餐\n减脂食谱\n健康饮食" : "刘宇宁\n综艺\n明星\n留空则监控全部文娱热搜"}
                     value={createKeywords}
                     onChange={(e) => setCreateKeywords(e.target.value)}
-                    rows={3}
+                    rows={2}
                   />
                 </Form.Item>
               </Col>
             </Row>
             <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Form.Item label="PC 账号（用于抓取）" required>
-                  <Select
-                    placeholder="选择 PC 账号"
-                    value={createPcAccountId}
-                    onChange={(v) => setCreatePcAccountId(v)}
-                    options={pcAccounts.map((a) => ({
-                      value: a.id,
-                      label: `${a.nickname || "PC"} (#${a.id})`,
-                    }))}
-                    allowClear
-                  />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
+              {createTaskType === "xhs_keyword" && (
+                <Col xs={24} md={12}>
+                  <Form.Item label="PC 账号（用于抓取）" required>
+                    <Select
+                      placeholder="选择 PC 账号"
+                      value={createPcAccountId}
+                      onChange={(v) => setCreatePcAccountId(v)}
+                      options={pcAccounts.map((a) => ({
+                        value: a.id,
+                        label: `${a.nickname || "PC"} (#${a.id})`,
+                      }))}
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+              )}
+              <Col xs={24} md={createTaskType === "xhs_keyword" ? 12 : 24}>
                 <Form.Item label="Creator 账号（用于发布）" required>
                   <Select
                     placeholder="选择 Creator 账号"
@@ -622,6 +663,17 @@ export function AutoOpsPage() {
         cancelText="取消"
       >
         <Form layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item label="任务类型" required>
+            <Select
+              value={editTaskType}
+              onChange={(v) => setEditTaskType(v as any)}
+              options={[
+                { value: "xhs_keyword", label: "小红书关键词监控" },
+                { value: "weibo_hot", label: "微博实时热搜监控" },
+                { value: "weibo_entertainment", label: "微博文娱热搜监控" },
+              ]}
+            />
+          </Form.Item>
           <Form.Item label="任务名称">
             <Input
               value={editName}
@@ -629,7 +681,7 @@ export function AutoOpsPage() {
               maxLength={128}
             />
           </Form.Item>
-          <Form.Item label="关键词（每行一个）">
+          <Form.Item label={editTaskType === "xhs_keyword" ? "关键词（每行一个）" : "关键词/分类过滤（每行一个，非必填）"}>
             <TextArea
               value={editKeywords}
               onChange={(e) => setEditKeywords(e.target.value)}

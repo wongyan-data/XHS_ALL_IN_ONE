@@ -643,6 +643,7 @@ export type AutoTask = {
   id: number;
   user_id: number;
   name: string;
+  task_type: "xhs_keyword" | "weibo_hot" | "weibo_entertainment" | string;
   keywords: string[];
   pc_account_id: number;
   creator_account_id: number;
@@ -660,8 +661,9 @@ export type AutoTask = {
 
 export type AutoTaskCreatePayload = {
   name: string;
+  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment";
   keywords: string[];
-  pc_account_id: number;
+  pc_account_id?: number | null;
   creator_account_id: number;
   ai_instruction?: string;
   schedule_type?: "manual" | "daily" | "weekly" | "interval";
@@ -672,7 +674,9 @@ export type AutoTaskCreatePayload = {
 
 export type AutoTaskUpdatePayload = {
   name?: string;
+  task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment";
   keywords?: string[];
+  pc_account_id?: number | null;
   ai_instruction?: string;
   status?: "active" | "paused" | "completed";
   schedule_type?: "manual" | "daily" | "weekly" | "interval";
