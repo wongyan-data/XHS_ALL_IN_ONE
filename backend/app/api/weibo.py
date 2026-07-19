@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.core.deps import get_current_user
 from backend.app.models import AiDraft, DraftAsset, PublishJob, User, AiGeneratedAsset
-from backend.app.api.ai import _text_model_context, _recorded_text_task
-from backend.app.services.ai_service import get_text_ai_client, TextAiClient
+from backend.app.api.ai import _text_model_context, _recorded_text_task, get_text_ai_client
+from backend.app.services.ai_service import TextAiClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/weibo", tags=["weibo"])
