@@ -897,7 +897,76 @@ def run_auto_task(
     tracking_task.progress = 80
     db.flush()
 
-    # 6. Create a PublishJob with the Creator account
+    # 6. Get Creator cookies & Upload assets to Creator API
+    creator_cv = db.scalars(
+        select(AccountCookieVersion)
+        .where(AccountCookieVersion.platform_account_id == auto_task.creator_account_id)
+        .order_by(AccountCookieVersion.created_at.desc())
+    ).first()
+    if not creator_cv:
+        msg = "Creator 账号未绑定 Cookies，请先在网页端登录"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+        
+    from backend.app.api.publish import _cookies_to_string
+    creator_cookies_str = _cookies_to_string(decrypt_text(creator_cv.encrypted_cookies))
+    creator_adapter = XhsCreatorApiAdapter(creator_cookies_str)
+    
+    image_urls = best_note.get("image_urls", [])
+    if not isinstance(image_urls, list):
+        image_urls = []
+        
+    file_infos = []
+    for url in image_urls[:9]:
+        if isinstance(url, str) and url:
+            try:
+                payload = creator_adapter.upload_media(url, "image")
+                file_infos.append(payload)
+            except Exception as exc:
+                local_logger.warning(f"Auto task {auto_task.id} image upload failed: {exc}")
+                
+    # If no images found on source note, draw cover image
+    if not file_infos:
+        try:
+            from uuid import uuid4
+            from pathlib import Path
+            from backend.app.core.config import get_settings
+            from backend.app.services.image_util import compose_cover_image
+            
+            file_name = f"xhs-upload-u{auto_task.user_id}-{uuid4().hex}.png"
+            media_dir = Path(get_settings().storage_dir) / "media"
+            media_dir.mkdir(parents=True, exist_ok=True)
+            output_path = media_dir / file_name
+            
+            compose_cover_image(
+                output_path=output_path,
+                title=draft.title,
+                body=draft.body[:200] + ("..." if len(draft.body) > 200 else ""),
+                width=1080,
+                height=1440,
+                background_color="#fafaf8",
+                accent_color="#111111"
+            )
+            cover_url = f"/api/files/media/{file_name}"
+            payload = creator_adapter.upload_media(cover_url, "image")
+            file_infos.append(payload)
+        except Exception as exc:
+            local_logger.error(f"Auto task {auto_task.id} PIL cover upload failed: {exc}")
+
+    if not file_infos:
+        msg = "无法将任何配图上传至小红书创作者后台"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg)
+
+    # Create PublishJob & Publish Assets
     publish_job = PublishJob(
         user_id=current_user.id,
         platform_account_id=auto_task.creator_account_id,
@@ -906,22 +975,45 @@ def run_auto_task(
         title=draft.title,
         body=draft.body,
         publish_mode="immediate",
-        status="pending",
+        status="publishing",
     )
     db.add(publish_job)
     db.flush()
 
-    # 6b. Copy image assets from source note
-    image_urls = best_note.get("image_urls", [])
-    if isinstance(image_urls, list):
-        for url in image_urls[:9]:  # max 9 images
-            if isinstance(url, str) and url:
-                db.add(PublishAsset(
-                    publish_job_id=publish_job.id,
-                    asset_type="image",
-                    file_path=url,
-                    upload_status="pending",
-                ))
+    for info in file_infos:
+        db.add(PublishAsset(
+            publish_job_id=publish_job.id,
+            asset_type="image",
+            file_path="",
+            upload_status="uploaded",
+            creator_media_id=info.get("fileIds", ""),
+            creator_upload_info=json.dumps(info, ensure_ascii=False),
+        ))
+    db.flush()
+
+    # Post Note to Creator API immediately
+    try:
+        note_info = {
+            "title": publish_job.title,
+            "desc": publish_job.body,
+            "media_type": "image",
+            "image_file_infos": file_infos,
+            "type": 0,
+            "postTime": None,
+        }
+        result = creator_adapter.post_note(note_info)
+        publish_job.status = "published"
+        publish_job.external_note_id = ""
+        for key in ("note_id", "noteId", "id"):
+            v = result.get(key) or (result.get("data", {}) or {}).get(key)
+            if v:
+                publish_job.external_note_id = str(v)
+                break
+        publish_job.published_at = shanghai_now()
+    except Exception as exc:
+        publish_job.status = "failed"
+        publish_job.publish_error = str(exc)[:500]
+        local_logger.warning(f"Auto task {auto_task.id} publish failed: {exc}")
 
     # 7. Update auto task counters
     auto_task.total_published = (auto_task.total_published or 0) + 1
@@ -933,7 +1025,7 @@ def run_auto_task(
     tracking_task.payload = {
         **(tracking_task.payload or {}),
         "publish_job_id": publish_job.id,
-        "rewritten_length": len(rewritten_body),
+        "rewritten_length": len(draft.body),
     }
 
     db.commit()
