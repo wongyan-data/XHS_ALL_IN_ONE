@@ -1290,6 +1290,7 @@ export function XhsDraftsPage() {
             src={previewImage}
             style={{ display: "none" }}
             preview={{ visible: true, onVisibleChange: (v) => { if (!v) setPreviewImage(null); } }}
+            referrerPolicy="no-referrer"
           />
         )}
       </Row>

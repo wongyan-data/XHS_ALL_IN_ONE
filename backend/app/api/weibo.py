@@ -96,6 +96,23 @@ def _clean_html_tags(raw_html: str) -> str:
     return html.unescape(cleantext).strip()
 
 
+def _strip_markdown(text: str) -> str:
+    if not text:
+        return text
+    # Strip bold (**text** or __text__)
+    text = re.sub(r'(\*\*|__)(.*?)\1', r'\2', text)
+    # Strip italic (*text* or _text_)
+    text = re.sub(r'(\*|_)(.*?)\1', r'\2', text)
+    # Strip headers (# text)
+    text = re.sub(r'(?m)^#{1,6}\s+', '', text)
+    # Strip inline code (`text`)
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    # Remove any leftover double asterisks
+    text = text.replace("**", "").replace("__", "")
+    return text
+
+
+
 @router.get("/hot-search")
 def get_weibo_hot_search() -> dict[str, Any]:
     import requests
@@ -239,12 +256,12 @@ def generate_draft_from_hot_search(
         ),
     )
     
-    body = result.get("body") or ""
-    title = result.get("title") or payload.word
+    body_raw = result.get("body") or ""
+    title_raw = result.get("title") or payload.word
     
     # 3. Parse tags from AI rewritten body
     # Standard Xiaohongshu tags are preceded by '#'
-    raw_tags = re.findall(r'#([^\s#，,]+)', body)
+    raw_tags = re.findall(r'#([^\s#，,]+)', body_raw)
     tags = []
     seen_tags = set()
     for t in raw_tags:
@@ -252,6 +269,9 @@ def generate_draft_from_hot_search(
         if cleaned and cleaned not in seen_tags:
             seen_tags.add(cleaned)
             tags.append({"id": "", "name": cleaned})
+            
+    body = _strip_markdown(body_raw)
+    title = _strip_markdown(title_raw)
             
     # 4. Create AiDraft
     draft = AiDraft(

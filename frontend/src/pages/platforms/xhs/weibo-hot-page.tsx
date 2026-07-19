@@ -292,6 +292,7 @@ export function WeiboHotSearchPage() {
                                       height={80}
                                       preview={false}
                                       style={{ objectFit: "cover" }}
+                                      referrerPolicy="no-referrer"
                                     />
                                     {imgSelected && (
                                       <div

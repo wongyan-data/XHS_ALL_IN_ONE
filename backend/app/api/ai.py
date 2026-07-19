@@ -18,6 +18,24 @@ from backend.app.services.ai_service import ImageAiClient, OpenAICompatibleImage
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 
+def _strip_markdown(text: str) -> str:
+    if not text:
+        return text
+    import re
+    # Strip bold (**text** or __text__)
+    text = re.sub(r'(\*\*|__)(.*?)\1', r'\2', text)
+    # Strip italic (*text* or _text_)
+    text = re.sub(r'(\*|_)(.*?)\1', r'\2', text)
+    # Strip headers (# text)
+    text = re.sub(r'(?m)^#{1,6}\s+', '', text)
+    # Strip inline code (`text`)
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    # Remove any leftover double asterisks
+    text = text.replace("**", "").replace("__", "")
+    return text
+
+
+
 class RewriteNoteRequest(BaseModel):
     draft_id: int
     instruction: str = Field(default="", max_length=800)
@@ -237,7 +255,7 @@ def rewrite_note(
             instruction=payload.instruction,
         ),
     )
-    draft.body = rewritten_body
+    draft.body = _strip_markdown(rewritten_body)
     task.payload = {**(task.payload or {}), "result_draft_id": draft.id, "result_length": len(rewritten_body)}
     db.commit()
     db.refresh(draft)
@@ -269,8 +287,8 @@ def generate_note(
     draft = AiDraft(
         user_id=current_user.id,
         platform=payload.platform,
-        title=result.get("title") or payload.topic,
-        body=result.get("body") or "",
+        title=_strip_markdown(result.get("title") or payload.topic),
+        body=_strip_markdown(result.get("body") or ""),
     )
     db.add(draft)
     db.flush()
@@ -357,7 +375,7 @@ def polish_text(
     )
     task.payload = {**(task.payload or {}), "result_length": len(text)}
     db.commit()
-    return {"text": text}
+    return {"text": _strip_markdown(text)}
 
 
 @router.get("/images/assets")
