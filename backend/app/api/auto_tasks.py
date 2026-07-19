@@ -37,7 +37,7 @@ router = APIRouter(prefix="/auto-tasks", tags=["auto-tasks"])
 class AutoTaskCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     keywords: list[str] = Field(default_factory=list)
-    task_type: str = Field(default="xhs_keyword", pattern="^(xhs_keyword|weibo_hot|weibo_entertainment)$")
+    task_type: str = Field(default="xhs_keyword", pattern="^(xhs_keyword|weibo_hot|weibo_entertainment|group_consolidation)$")
     pc_account_id: Optional[int] = None
     creator_account_id: int
     ai_instruction: str = Field(default="", max_length=2000)
@@ -50,7 +50,7 @@ class AutoTaskCreateRequest(BaseModel):
 class AutoTaskUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     keywords: Optional[list[str]] = None
-    task_type: Optional[str] = Field(default=None, pattern="^(xhs_keyword|weibo_hot|weibo_entertainment)$")
+    task_type: Optional[str] = Field(default=None, pattern="^(xhs_keyword|weibo_hot|weibo_entertainment|group_consolidation)$")
     ai_instruction: Optional[str] = Field(default=None, max_length=2000)
     status: Optional[str] = Field(default=None, pattern="^(active|paused|completed)$")
     schedule_type: Optional[str] = Field(default=None, pattern="^(manual|daily|weekly|interval)$")
@@ -263,94 +263,110 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
     
     local_logger = logging.getLogger(__name__)
 
-    # 1. Fetch Weibo Hot Search or Entertainment Board
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://s.weibo.com/',
-        'Accept': 'application/json'
-    }
-    
-    topics = []
-    if auto_task.task_type == "weibo_entertainment":
-        # Fetch Weibo Entertainment Board from s.weibo.com
-        session = _get_visitor_session()
-        url = 'https://s.weibo.com/top/summary?cate=entrank'
-        res = session.get(url, timeout=10)
-        res.raise_for_status()
+    # 1 & 2. Fetch and filter topics if hot search task
+    topic_label = ""
+    if auto_task.task_type in ("weibo_hot", "weibo_entertainment"):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://s.weibo.com/',
+            'Accept': 'application/json'
+        }
         
-        # Regex search for class td-02 td cells
-        pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=([^&"]+).*?>(.*?)</a>', re.DOTALL)
-        matches = pattern.findall(res.text)
-        
-        for idx, (q, text) in enumerate(matches):
-            word = urllib.parse.unquote(q).strip("#")
-            num = 0
-            label = ""
-            # Find span following the link inside that td block to extract category name and search volume
-            td_pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=' + re.escape(q) + r'.*?>(.*?)</a>.*?<span>(.*?)</span>', re.DOTALL)
-            td_match = td_pattern.search(res.text)
-            if td_match:
-                span_content = td_match.group(2).strip()
-                span_parts = span_content.split()
-                if span_parts:
-                    if len(span_parts) > 1 and not span_parts[0].isdigit():
-                        label = span_parts[0]
-                        num = int(span_parts[1]) if span_parts[1].isdigit() else 0
-                    elif span_parts[0].isdigit():
-                        num = int(span_parts[0])
+        topics = []
+        if auto_task.task_type == "weibo_entertainment":
+            # Fetch Weibo Entertainment Board from s.weibo.com
+            session = _get_visitor_session()
+            url = 'https://s.weibo.com/top/summary?cate=entrank'
+            res = session.get(url, timeout=10)
+            res.raise_for_status()
             
-            topics.append({
-                "word": word,
-                "num": num,
-                "label": label
-            })
-    else:
-        # Fetch Weibo Main Hot Search Board
-        url = 'https://weibo.com/ajax/side/hotSearch'
-        res = requests.get(url, headers=headers, timeout=10)
-        res.raise_for_status()
-        realtime = res.json().get('data', {}).get('realtime', [])
-        for item in realtime:
-            if item.get('is_ad') or item.get('flag') == 1:
-                continue
-            topics.append({
-                "word": item.get("word", ""),
-                "num": item.get("num", 0),
-                "label": item.get("label_name", "").strip() or item.get("flag_desc", "").strip()
-            })
+            # Regex search for class td-02 td cells
+            pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=([^&"]+).*?>(.*?)</a>', re.DOTALL)
+            matches = pattern.findall(res.text)
+            
+            for idx, (q, text) in enumerate(matches):
+                word = urllib.parse.unquote(q).strip("#")
+                num = 0
+                label = ""
+                # Find span following the link inside that td block to extract category name and search volume
+                td_pattern = re.compile(r'<td class="td-02">.*?<a href="/weibo\?q=' + re.escape(q) + r'.*?>(.*?)</a>.*?<span>(.*?)</span>', re.DOTALL)
+                td_match = td_pattern.search(res.text)
+                if td_match:
+                    span_content = td_match.group(2).strip()
+                    span_parts = span_content.split()
+                    if span_parts:
+                        if len(span_parts) > 1 and not span_parts[0].isdigit():
+                            label = span_parts[0]
+                            num = int(span_parts[1]) if span_parts[1].isdigit() else 0
+                        elif span_parts[0].isdigit():
+                            num = int(span_parts[0])
+                
+                topics.append({
+                    "word": word,
+                    "num": num,
+                    "label": label
+                })
+        else:
+            # Fetch Weibo Main Hot Search Board
+            url = 'https://weibo.com/ajax/side/hotSearch'
+            res = requests.get(url, headers=headers, timeout=10)
+            res.raise_for_status()
+            realtime = res.json().get('data', {}).get('realtime', [])
+            for item in realtime:
+                if item.get('is_ad') or item.get('flag') == 1:
+                    continue
+                topics.append({
+                    "word": item.get("word", ""),
+                    "num": item.get("num", 0),
+                    "label": item.get("label_name", "").strip() or item.get("flag_desc", "").strip()
+                })
 
-    # 2. Filter topics based on keywords
-    keywords = auto_task.keywords or []
-    matched_topics = []
-    if keywords:
-        for t in topics:
-            word_lower = t["word"].lower()
-            label_lower = t["label"].lower() if t["label"] else ""
-            if any(k.lower() in word_lower or k.lower() in label_lower for k in keywords):
-                matched_topics.append(t)
+        # Filter topics based on keywords
+        keywords = auto_task.keywords or []
+        matched_topics = []
+        if keywords:
+            for t in topics:
+                word_lower = t["word"].lower()
+                label_lower = t["label"].lower() if t["label"] else ""
+                if any(k.lower() in word_lower or k.lower() in label_lower for k in keywords):
+                    matched_topics.append(t)
+        else:
+            # If no keywords are configured, match all
+            matched_topics = topics
+            
+        if not matched_topics:
+            msg = "没有匹配当前关键词/分类过滤器的微博热搜"
+            if tracking_task:
+                tracking_task.status = "failed"
+                tracking_task.progress = 100
+                tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+                db.commit()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
+            
+        # Pick the top-ranking topic (first item after filtering)
+        best_topic = matched_topics[0]
+        keyword = best_topic["word"]
+        topic_label = best_topic["label"]
     else:
-        # If no keywords are configured, match all
-        matched_topics = topics
+        # group_consolidation task type - directly pick keyword from keywords
+        keywords = auto_task.keywords or []
+        if not keywords:
+            msg = "未配置特定团体监控关键词"
+            if tracking_task:
+                tracking_task.status = "failed"
+                tracking_task.progress = 100
+                tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+                db.commit()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+        keyword = random.choice(keywords)
+        topic_label = "特定团体监控"
         
-    if not matched_topics:
-        msg = "没有匹配当前关键词/分类过滤器的微博热搜"
-        if tracking_task:
-            tracking_task.status = "failed"
-            tracking_task.progress = 100
-            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
-            db.commit()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
-        
-    # 3. Pick the top-ranking topic (first item after filtering)
-    best_topic = matched_topics[0]
-    keyword = best_topic["word"]
-    
     if tracking_task:
         tracking_task.progress = 30
         tracking_task.payload = {
             **(tracking_task.payload or {}),
             "keyword": keyword,
-            "topic_label": best_topic["label"]
+            "topic_label": topic_label
         }
         db.flush()
         
@@ -416,14 +432,72 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
                 if img_url and img_url not in selected_images:
                     selected_images.append(img_url)
                     
-    reference_material = "\n\n".join(
-        f"微博参考内容 {idx+1}:\n{tweet}" 
-        for idx, tweet in enumerate(reference_tweets)
-    )
+    xhs_notes = []
+    web_results = []
     
-    if tracking_task:
-        tracking_task.progress = 50
-        db.flush()
+    if auto_task.task_type == "group_consolidation":
+        # Search XHS notes for target group
+        if auto_task.pc_account_id:
+            try:
+                pc_account = db.get(PlatformAccount, auto_task.pc_account_id)
+                if pc_account:
+                    pc_cookies = _get_account_cookies(db, auto_task.pc_account_id)
+                    from backend.app.adapters.xhs.pc_api_adapter import XhsPcApiAdapter
+                    adapter = XhsPcApiAdapter(pc_cookies)
+                    success, msg, raw_payload = adapter.search_note(keyword, page=1)
+                    if success:
+                        from backend.app.api.platforms.xhs.crawl import _data_items, _normalize_search_item
+                        items = _data_items(raw_payload)
+                        xhs_notes = [_normalize_search_item(item) for item in items][:5]
+            except Exception as exc:
+                local_logger.warning(f"Auto task {auto_task.id} XHS note search failed: {exc}")
+                
+        # Search Web (Baidu) for target group
+        try:
+            from backend.app.services.search_service import search_baidu
+            web_results = search_baidu(keyword, limit=5)
+        except Exception as exc:
+            local_logger.warning(f"Auto task {auto_task.id} web search failed: {exc}")
+            
+        # Collect XHS note cover images
+        for n in xhs_notes:
+            img_list = n.get("image_urls") or []
+            for url in img_list:
+                if url and url not in selected_images:
+                    selected_images.append(url)
+                    
+        # Consolidate reference material
+        ref_parts = []
+        if reference_tweets:
+            ref_parts.append("### 微博热议动态：\n" + "\n".join(
+                f"- {tweet}" for tweet in reference_tweets
+            ))
+        if xhs_notes:
+            ref_parts.append("### 小红书热门笔记动态：\n" + "\n".join(
+                f"- 标题: {n.get('title')} | 摘要: {n.get('content', '')[:100]}"
+                for n in xhs_notes if n.get('title')
+            ))
+        if web_results:
+            ref_parts.append("### 网页最新新闻与动态摘要：\n" + "\n".join(
+                f"- 标题: {r['title']} | 摘要: {r['snippet']}"
+                for r in web_results
+            ))
+        reference_material = "\n\n".join(ref_parts)
+        
+        ai_instruction = auto_task.ai_instruction or (
+            "你是一个资深垂直领域运营博主。请根据提供的微博动态、小红书热点以及最新网页新闻，"
+            "进行内容整合和情报提炼，为粉丝撰写一篇信息量饱满、语气活泼的小红书每日动态追踪日报。"
+            "合理搭配表情符号（Emoji），并在末尾推荐3-5个小红书话题。"
+        )
+    else:
+        reference_material = "\n\n".join(
+            f"微博参考内容 {idx+1}:\n{tweet}" 
+            for idx, tweet in enumerate(reference_tweets)
+        )
+        ai_instruction = auto_task.ai_instruction or (
+            "将此热搜主题改写为一篇吸引人的小红书图文笔记。风格活泼、口语化，"
+            "使用大量适宜的表情符号（Emoji）增加趣味，并自动推荐3-5个小红书话题。"
+        )
         
     # 5. Call AI text client to rewrite title & body
     model_config = db.scalars(
@@ -444,11 +518,6 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
         
     api_key = decrypt_text(model_config.encrypted_api_key) if model_config.encrypted_api_key else ""
     text_client = OpenAICompatibleTextClient()
-    
-    ai_instruction = auto_task.ai_instruction or (
-        "将此热搜主题改写为一篇吸引人的小红书图文笔记。风格活泼、口语化，"
-        "使用大量适宜的表情符号（Emoji）增加趣味，并自动推荐3-5个小红书话题。"
-    )
     
     ai_result = text_client.generate_note(
         model_config=model_config,

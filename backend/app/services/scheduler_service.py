@@ -447,12 +447,12 @@ def _scheduler_cookies_to_string(value: str) -> str:
 
 def _execute_auto_task_background(db: Session, task: AutoTask) -> None:
     """Simplified auto-task execution for background scheduler."""
-    if getattr(task, "task_type", "xhs_keyword") in ("weibo_hot", "weibo_entertainment"):
+    if getattr(task, "task_type", "xhs_keyword") in ("weibo_hot", "weibo_entertainment", "group_consolidation"):
         try:
             from backend.app.api.auto_tasks import _execute_weibo_auto_task
             _execute_weibo_auto_task(db, task)
         except Exception as exc:
-            logger.error(f"Scheduler execution of Weibo auto task {task.id} failed: {exc}")
+            logger.error(f"Scheduler execution of Weibo/Consolidation auto task {task.id} failed: {exc}")
         return
 
     import random
