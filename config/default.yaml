@@ -49,7 +49,7 @@ security:
 
 scheduler:
   # Enable background task scheduler (publish jobs, monitoring refresh)
-  enabled: false
+  enabled: true
   # Polling interval in seconds
   interval_seconds: 60
 
