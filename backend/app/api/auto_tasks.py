@@ -700,6 +700,7 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
         body=draft.body,
         publish_mode="immediate",
         status="publishing",
+        publish_options=json.dumps({"draft_tags": draft.tags, "topics": [t["name"] for t in (draft.tags or [])]}, ensure_ascii=False)
     )
     db.add(job)
     db.flush()
@@ -728,6 +729,7 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
             "image_file_infos": file_infos,
             "type": 0,
             "postTime": None,
+            "topics": [t["name"] for t in (draft.tags or [])]
         }
         result = creator_adapter.post_note(note_info)
         job.status = "published"
