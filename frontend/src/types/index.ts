@@ -677,6 +677,7 @@ export type AutoTaskUpdatePayload = {
   task_type?: "xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation";
   keywords?: string[];
   pc_account_id?: number | null;
+  creator_account_id?: number | null;
   ai_instruction?: string;
   status?: "active" | "paused" | "completed";
   schedule_type?: "manual" | "daily" | "weekly" | "interval";

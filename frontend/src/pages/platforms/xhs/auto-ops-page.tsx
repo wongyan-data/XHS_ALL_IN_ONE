@@ -95,6 +95,8 @@ export function AutoOpsPage() {
   const [editName, setEditName] = useState("");
   const [editTaskType, setEditTaskType] = useState<"xhs_keyword" | "weibo_hot" | "weibo_entertainment" | "group_consolidation">("xhs_keyword");
   const [editKeywords, setEditKeywords] = useState("");
+  const [editPcAccountId, setEditPcAccountId] = useState<number | null>(null);
+  const [editCreatorAccountId, setEditCreatorAccountId] = useState<number | null>(null);
   const [editInstruction, setEditInstruction] = useState("");
   const [editScheduleType, setEditScheduleType] = useState("manual");
   const [editScheduleTime, setEditScheduleTime] = useState("09:00");
@@ -241,10 +243,21 @@ export function AutoOpsPage() {
     setEditScheduleTime(task.schedule_time || "09:00");
     setEditScheduleDays(task.schedule_days || "");
     setEditIntervalHours(task.schedule_interval_hours || 24);
+    setEditPcAccountId(task.pc_account_id || null);
+    setEditCreatorAccountId(task.creator_account_id || null);
   }
 
   async function handleSaveEdit() {
     if (!editTask) return;
+    if (!editName.trim() || !editCreatorAccountId) {
+      setError("请填写任务名称并选择 Creator 账号。");
+      return;
+    }
+    if ((editTaskType === "xhs_keyword" || editTaskType === "group_consolidation") && !editPcAccountId) {
+      setError("小红书关键词监控与特定团体多源监测任务必须选择 PC 账号。");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     setMessage(null);
@@ -254,6 +267,8 @@ export function AutoOpsPage() {
         name: editName.trim() || undefined,
         task_type: editTaskType,
         keywords: keywords,
+        pc_account_id: (editTaskType === "xhs_keyword" || editTaskType === "group_consolidation") ? editPcAccountId : null,
+        creator_account_id: editCreatorAccountId,
         ai_instruction: editInstruction,
         schedule_type: editScheduleType as "manual" | "daily" | "weekly" | "interval",
         schedule_time: editScheduleTime,
@@ -263,8 +278,9 @@ export function AutoOpsPage() {
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       setEditTask(null);
       setMessage(`任务"${updated.name}"已更新。`);
-    } catch {
-      setError("更新任务失败。");
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      setError(`更新任务失败：${detail || err.message || ""}`);
     } finally {
       setIsSaving(false);
     }
@@ -689,6 +705,35 @@ export function AutoOpsPage() {
               maxLength={128}
             />
           </Form.Item>
+
+          {(editTaskType === "xhs_keyword" || editTaskType === "group_consolidation") && (
+            <Form.Item label="PC 账号（用于抓取）" required>
+              <Select
+                placeholder="选择 PC 账号"
+                value={editPcAccountId}
+                onChange={(v) => setEditPcAccountId(v)}
+                options={pcAccounts.map((a) => ({
+                  value: a.id,
+                  label: `${a.nickname || "PC"} (#${a.id})`,
+                }))}
+                allowClear
+              />
+            </Form.Item>
+          )}
+
+          <Form.Item label="Creator 账号（用于发布）" required>
+            <Select
+              placeholder="选择 Creator 账号"
+              value={editCreatorAccountId}
+              onChange={(v) => setEditCreatorAccountId(v)}
+              options={creatorAccounts.map((a) => ({
+                value: a.id,
+                label: `${a.nickname || "Creator"} (#${a.id})`,
+              }))}
+              allowClear
+            />
+          </Form.Item>
+
           <Form.Item label={editTaskType === "xhs_keyword" ? "关键词（每行一个）" : editTaskType === "group_consolidation" ? "监控团体名称（每行一个）" : "关键词/分类过滤（每行一个，非必填）"}>
             <TextArea
               value={editKeywords}

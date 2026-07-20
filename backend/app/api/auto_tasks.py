@@ -51,6 +51,8 @@ class AutoTaskUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     keywords: Optional[list[str]] = None
     task_type: Optional[str] = Field(default=None, pattern="^(xhs_keyword|weibo_hot|weibo_entertainment|group_consolidation)$")
+    pc_account_id: Optional[int] = None
+    creator_account_id: Optional[int] = None
     ai_instruction: Optional[str] = Field(default=None, max_length=2000)
     status: Optional[str] = Field(default=None, pattern="^(active|paused|completed)$")
     schedule_type: Optional[str] = Field(default=None, pattern="^(manual|daily|weekly|interval)$")
@@ -214,6 +216,26 @@ def update_auto_task(
         auto_task.ai_instruction = payload.ai_instruction
     if payload.status is not None:
         auto_task.status = payload.status
+
+    # Update creator and PC accounts if provided
+    if payload.creator_account_id is not None:
+        _verify_account_ownership(db, current_user, payload.creator_account_id, "creator")
+        auto_task.creator_account_id = payload.creator_account_id
+
+    target_type = payload.task_type if payload.task_type is not None else auto_task.task_type
+    if target_type in ("xhs_keyword", "group_consolidation"):
+        pc_id = payload.pc_account_id if payload.pc_account_id is not None else auto_task.pc_account_id
+        if pc_id:
+            _verify_account_ownership(db, current_user, pc_id, "pc")
+            auto_task.pc_account_id = pc_id
+        else:
+            if target_type == "xhs_keyword":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="小红书关键词监控任务必须选择 PC 账号")
+            elif target_type == "group_consolidation":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="特定团体多源监测任务必须选择 PC 账号")
+    else:
+        # Weibo hot search tasks fallback pc_account_id to creator_account_id
+        auto_task.pc_account_id = auto_task.creator_account_id
 
     schedule_changed = False
     if payload.schedule_type is not None:
