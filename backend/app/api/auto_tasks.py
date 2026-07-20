@@ -808,7 +808,7 @@ def run_auto_task(
     db.flush()
 
     # Route according to task_type
-    if auto_task.task_type in ("weibo_hot", "weibo_entertainment"):
+    if auto_task.task_type in ("weibo_hot", "weibo_entertainment", "group_consolidation"):
         return _execute_weibo_auto_task(db, auto_task, tracking_task)
 
     # 1. Pick a random keyword
