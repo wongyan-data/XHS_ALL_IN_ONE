@@ -520,13 +520,22 @@ def _execute_weibo_auto_task(db: Session, auto_task: AutoTask, tracking_task: Op
     api_key = decrypt_text(model_config.encrypted_api_key) if model_config.encrypted_api_key else ""
     text_client = OpenAICompatibleTextClient()
     
-    ai_result = text_client.generate_note(
-        model_config=model_config,
-        api_key=api_key,
-        topic=keyword,
-        reference=reference_material,
-        instruction=ai_instruction,
-    )
+    try:
+        ai_result = text_client.generate_note(
+            model_config=model_config,
+            api_key=api_key,
+            topic=keyword,
+            reference=reference_material,
+            instruction=ai_instruction,
+        )
+    except Exception as exc:
+        msg = f"AI 洗稿失败: {exc}"
+        if tracking_task:
+            tracking_task.status = "failed"
+            tracking_task.progress = 100
+            tracking_task.payload = {**(tracking_task.payload or {}), "error": msg}
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg)
     
     raw_body = ai_result.get("body") or ""
     raw_title = ai_result.get("title") or keyword
