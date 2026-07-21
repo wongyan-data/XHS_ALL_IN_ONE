@@ -83,6 +83,12 @@ class DescribeImageRequest(BaseModel):
     instruction: str = Field(default="", max_length=800)
 
 
+class AntiAiCheckRequest(BaseModel):
+    title: str = Field(default="", max_length=500)
+    body: str = Field(min_length=1, max_length=10000)
+    voice: Optional[str] = None
+
+
 def get_text_ai_client() -> TextAiClient:
     return OpenAICompatibleTextClient()
 
@@ -512,3 +518,12 @@ def describe_image(
     task.payload = {**(task.payload or {}), "result_length": len(text)}
     db.commit()
     return {"text": text}
+
+
+@router.post("/anti-ai-check")
+def anti_ai_check(
+    payload: AntiAiCheckRequest,
+    current_user: User = Depends(get_current_user),
+):
+    from backend.app.services.anti_ai_checker import check_anti_ai
+    return check_anti_ai(payload.title, payload.body, payload.voice)

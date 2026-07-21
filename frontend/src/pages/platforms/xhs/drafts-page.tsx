@@ -61,8 +61,9 @@ import {
   sendDraftToPublish,
   updateDraft,
   uploadAssetFile,
+  checkAntiAi,
 } from "../../../lib/api";
-import type { DraftAsset } from "../../../lib/api";
+import type { DraftAsset, AntiAiCheckResponse } from "../../../lib/api";
 import { formatShanghaiTime } from "../../../lib/time";
 import type { Draft, GeneratedImageAsset, SavedNote, UserImageFile } from "../../../types";
 
@@ -188,6 +189,10 @@ export function XhsDraftsPage() {
   const [refPickerOpen, setRefPickerOpen] = useState(false);
   const [refPickerUrlInput, setRefPickerUrlInput] = useState("");
 
+  const [antiAiChecking, setAntiAiChecking] = useState(false);
+  const [antiAiResult, setAntiAiResult] = useState<AntiAiCheckResponse | null>(null);
+  const [antiAiVoice, setAntiAiVoice] = useState("小严");
+
   const selectedDraft = drafts.find((d) => d.id === selectedDraftId) ?? null;
   const hasImageAssets = sourceAssets.some((a) => a.asset_type === "image");
   const hasVideoAssets = sourceAssets.some((a) => a.asset_type === "video");
@@ -205,6 +210,7 @@ export function XhsDraftsPage() {
     setBody(draft.body);
     setAssetUrl("");
     clearStatus();
+    setAntiAiResult(null);
   }
 
   /* ── data fetching ──────────────────────────────────────────────── */
@@ -250,6 +256,23 @@ export function XhsDraftsPage() {
       setMessage("草稿已删除。");
     } catch {
       setError("草稿删除失败。");
+    }
+  }
+
+  async function handleAntiAiCheck() {
+    if (!body.trim()) {
+      antMessage.warning("正文内容不能为空！");
+      return;
+    }
+    setAntiAiChecking(true);
+    try {
+      const res = await checkAntiAi({ title, body, voice: antiAiVoice });
+      setAntiAiResult(res);
+      antMessage.success("反AI味自检完成！");
+    } catch (err: any) {
+      antMessage.error(err.message || "自检请求失败");
+    } finally {
+      setAntiAiChecking(false);
     }
   }
 
@@ -1214,6 +1237,97 @@ export function XhsDraftsPage() {
                     保存
                   </Button>
                 </Form>
+              </Card>
+
+              {/* Anti-AI self-check card */}
+              <Card
+                title={
+                  <Space>
+                    <HighlightOutlined />
+                    <span>反AI味自检</span>
+                  </Space>
+                }
+                extra={
+                  <Space>
+                    <span style={{ fontSize: 12, color: "#8c8c8c" }}>人设口语:</span>
+                    <Input
+                      size="small"
+                      style={{ width: 100 }}
+                      placeholder="小严"
+                      value={antiAiVoice}
+                      onChange={(e) => setAntiAiVoice(e.target.value)}
+                    />
+                    <Button
+                      type="primary"
+                      ghost
+                      size="small"
+                      onClick={handleAntiAiCheck}
+                      loading={antiAiChecking}
+                      disabled={!selectedDraft}
+                    >
+                      开始检测
+                    </Button>
+                  </Space>
+                }
+              >
+                {!antiAiResult ? (
+                  <div style={{ textAlign: "center", padding: "12px 0" }}>
+                    <Text type="secondary" style={{ fontSize: 13 }}>
+                      点击右上角“开始检测”评估正文反AI质感（支持9条强制防风控检测）
+                    </Text>
+                  </div>
+                ) : (
+                  <div>
+                    <Row gutter={16} align="middle" style={{ marginBottom: 16, background: "rgba(255,255,255,0.02)", padding: 12, borderRadius: 8 }}>
+                      <Col span={8} style={{ textAlign: "center", borderRight: "1px solid #303030" }}>
+                        <div style={{ fontSize: 24, fontWeight: "bold", color: antiAiResult.score >= 80 ? "#52c41a" : antiAiResult.score >= 60 ? "#faad14" : "#ff4d4f" }}>
+                          {antiAiResult.score}分
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 11 }}>人味契合度</Text>
+                      </Col>
+                      <Col span={16} style={{ paddingLeft: 16 }}>
+                        <Text strong style={{ fontSize: 13, display: "block", marginBottom: 4 }}>
+                          诊断建议:
+                        </Text>
+                        <Text style={{ fontSize: 12, color: "#d9d9d9" }}>
+                          {antiAiResult.suggestion}
+                        </Text>
+                      </Col>
+                    </Row>
+                    
+                    <List
+                      size="small"
+                      dataSource={antiAiResult.results}
+                      renderItem={(item) => (
+                        <List.Item style={{ padding: "8px 0", borderBottom: "1px solid #222" }}>
+                          <div style={{ width: "100%" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                              <Text strong style={{ fontSize: 13 }}>
+                                {item.name}
+                              </Text>
+                              <Tag color={item.passed ? "success" : "error"} style={{ fontSize: 11 }}>
+                                {item.passed ? "通过" : "不达标"}
+                              </Tag>
+                            </div>
+                            <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
+                              {item.details}
+                            </Text>
+                            {item.violations && item.violations.length > 0 && (
+                              <div style={{ marginTop: 4 }}>
+                                <Text type="danger" style={{ fontSize: 11, marginRight: 8 }}>违规项:</Text>
+                                {item.violations.map((v, i) => (
+                                  <Tag key={i} color="red" style={{ fontSize: 10, margin: "2px" }}>
+                                    {v}
+                                  </Tag>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
               </Card>
 
               {/* Action buttons */}

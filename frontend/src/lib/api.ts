@@ -540,6 +540,33 @@ export async function polishTextWithAi(payload: PolishTextPayload): Promise<{ te
   return response.data;
 }
 
+export interface AntiAiCheckPayload {
+  title: string;
+  body: string;
+  voice?: string;
+}
+
+export interface AntiAiCheckResultItem {
+  id: string;
+  name: string;
+  passed: boolean;
+  details: string;
+  violations: string[];
+}
+
+export interface AntiAiCheckResponse {
+  score: number;
+  passed_rules_count: number;
+  results: AntiAiCheckResultItem[];
+  suggestion: string;
+}
+
+export async function checkAntiAi(payload: AntiAiCheckPayload): Promise<AntiAiCheckResponse> {
+  const response = await http.post<AntiAiCheckResponse>("/ai/anti-ai-check", payload);
+  return response.data;
+}
+
+
 export async function fetchGeneratedImageAssets(): Promise<Paginated<GeneratedImageAsset>> {
   const response = await http.get<Paginated<GeneratedImageAsset>>("/ai/images/assets");
   return response.data;
